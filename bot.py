@@ -2,11 +2,13 @@ import logging
 import telebot
 import datetime
 from googletrans import Translator
+from db_manager import DataBaseUpdater
+from db_manager import MindCard
 
 try:
     from settings import *
 except ImportError:
-    exit('Скопируйте settings.py.deafault как settings.py, укажите в нем токен и ID группы')
+    exit('Скопируйте settings.py.deafault как settings.py и укажите в нем токен')
 
 translator = Translator()
 
@@ -18,38 +20,28 @@ log.setLevel(logging.DEBUG)
 stream_handler.setLevel(logging.DEBUG)
 
 
-
 class User:
     def __init__(self, user_id, context=None):
         self.user_id = user_id
         self.mindcards = []
-        self.scenario = None
-        self.step = None
+        self.state = None
         self.context = context or {}
 
-    def get_card(self):
+    def get_card(self, db):
         if len(self.mindcards) > 0:
             self.mindcards = sorted(self.mindcards, key=lambda card: card.today_reverse_repeat)
             self.mindcards = sorted(self.mindcards, key=lambda card: card.today_repeat)
-        for card in self.mindcards:
+        for num, card in enumerate(self.mindcards):
             if card.today_repeat < 3 or card.today_reverse_repeat < 3:
                 return card
             else:
-                log.debug('Сохранение карточки в базу', card)
+                if card.repeat_mistake < 2:
+                    card.repeat_lvl += 1
+                db.update_base([card])
+                del self.mindcards[num]
 
 
-class MindCard:
-    def __init__(self, word_one, word_two, repeat_lvl=0):
-        self.word_one = word_one
-        self.word_two = word_two
-        self.create_date = datetime.date.today()
-        self.repeat_date = datetime.date.today() + datetime.timedelta(days=2 ** repeat_lvl - 1)
-        self.repeat_lvl = repeat_lvl
-        self.today_repeat = 0
-        self.today_reverse_repeat = 0
-
-
-test_mindcard = [MindCard('dog', 'собака'), MindCard('cat', 'кот'), MindCard('dick', 'хуй')]
+# test_mindcard = [MindCard('dog', 'собака'), MindCard('cat', 'кот'), MindCard('dick', 'хуй')]
 
 
 class Bot:
@@ -59,7 +51,7 @@ class Bot:
         self.token = token
         self.bot = None
         self.markup = None
-        self.current_user = None
+        self.db = DataBaseUpdater()
 
     def run(self):
         """
@@ -70,6 +62,10 @@ class Bot:
         self.bot.infinity_polling()
 
     def handle_messages(self, messages):
+        """
+        :param messages: income messages from user to bot
+        :return: run event handler
+        """
         for event in messages:
             try:
                 log.debug('обнаружен ивент: %s', event)
@@ -78,74 +74,127 @@ class Bot:
                 log.exception(f'Ошибка при получении ивента: {error}')
 
     def new_user(self, event):
+        """
+        :param event: income message from user to bot
+        :return: create new user for keeping repeating cards, load cards from database for the user id
+        """
         user_id = event.from_user.id
-        new_user = User(user_id)
-        self.users[user_id] = new_user
-        self.current_user = self.users[user_id]
-        log.debug('New user is created, current_user: %s', event.from_user.id)
+        user = User(user_id)
+        self.users[user_id] = user
+        users_db_cards = self.db.load_base(user)
+        if users_db_cards:
+            self.users[user_id].mindcards = users_db_cards
+        log.debug('New user is created, user_id: %s', event.from_user.id)
 
     def on_event(self, event):
+        user_id = event.from_user.id
         if event:
-            if event.from_user.id in self.users:
-                self.current_user = self.users[event.from_user.id]
-                self.current_user.mindcards = test_mindcard
-                log.debug(f'Change current_user: %s', event.from_user.id)
-            else:
+            if user_id not in self.users:
                 self.new_user(event)
+            user = self.users[user_id]
+            button_click = False
             if self.markup:
-                for button in self.markup.keyboard:
-                    if event.json['text'] == button[0]['text']:
-                        self.buttons_handler(event)
-            elif event.json['text'] == '/start':
-                self.current_user.scenario = '/start'
+                for keyboard in self.markup.keyboard:
+                    for button in keyboard:
+                        if event.json['text'] == button['text']:
+                            button_click = True
+                            self.buttons_handler(event, user)
+            if event.json['text'] == '/start':
+                user.state = 'start'
                 self.start(event)
-            else:
-                self.handle_text(event)
+            elif not button_click:
+                self.handle_text(event, user)
 
-    def start(self, m, res=False):
+    def start(self, event):
         log.debug('/start')
         markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        item1 = telebot.types.KeyboardButton('Send the test card')
-        item2 = telebot.types.KeyboardButton('Test button')
+        item1 = telebot.types.KeyboardButton('Repeat')
+        item2 = telebot.types.KeyboardButton('Create')
+        item3 = telebot.types.KeyboardButton('Translate')
         markup.add(item1)
         markup.add(item2)
+        markup.add(item3)
         self.markup = markup
-        self.bot.send_message(m.chat.id, 'Test button', reply_markup=markup)
+        self.bot.send_message(event.chat.id, MESSAGE['start'], reply_markup=self.markup)
 
-    def handle_text(self, message):
-        translated_message = translator.translate(message.text, dest='ru')
-        send_message = f'{message.text}\n{translated_message.text}'
-        entities = telebot.types.MessageEntity(offset=len(message.text) + 1, length=len(translated_message.text),
-                                               type='spoiler')
-        self.bot.send_message(message.chat.id, send_message, entities=[entities])
+    def handle_text(self, event, user):
+        if user.state == 'translate':
+            translated_message = translator.translate(event.text, dest='ru')
+            send_message = f'{event.text}\n{translated_message.text}'
+            self.bot.send_message(event.chat.id, send_message, reply_markup=self.markup)
+        elif user.state == 'create':
+            self.new_card(event, user)
+        else:
+            self.start(event)
+
+    def new_card(self, event, user):
+        break_num = event.text.find('\n')
+        if break_num > 0:
+            card = MindCard(word_one=event.text[:break_num],
+                            word_two=event.text[break_num+1:],
+                            user=user)
+            self.db.update_base([card])
+            user.mindcards.append(card)
+            send_message = f'Карточка {event.text[:break_num]}|{event.text[break_num+1:]} создана\n' \
+                           f'Можете создать ещё одну'
+            self.bot.send_message(event.chat.id, send_message, reply_markup=self.markup)
+        else:
+            self.bot.send_message(event.chat.id, 'error', reply_markup=self.markup)
 
     def send_card(self, event, card):
+        """
+        :param event: income message
+        :param card: mind card for sending
+        :return: send card for repeat to user with Remember, Forgot and Create buttons
+        """
         log.debug(f'sending card {card.word_one}/{card.word_two}')
+        # create buttons
         self.markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
         remember = telebot.types.KeyboardButton("Remember")
         forgot = telebot.types.KeyboardButton("Forgot")
-        new_word = telebot.types.KeyboardButton("New word")
+        new_word = telebot.types.KeyboardButton("Create")
+        translate = telebot.types.KeyboardButton('Translate')
+        # create buttons lines
         self.markup.row(remember, forgot)
-        self.markup.row(new_word)
+        self.markup.row(new_word, translate)
+        # 3 time repeats for one card side and 3 for another
         if card.today_repeat < 3:
             word_one, word_two = card.word_one, card.word_two
         else:
             word_two, word_one = card.word_one, card.word_two
-        log.debug(f'Send the card {word_one} - {word_two}, TR:{card.today_repeat}, TRR:{card.today_reverse_repeat}', card)
+        # message text
         send_message = f'{word_one}\n{word_two}'
+        # create entities for another card side spoiler
         entities = telebot.types.MessageEntity(offset=len(word_one) + 1, length=len(word_two),
                                                type='spoiler')
         self.bot.send_message(event.chat.id, send_message, entities=[entities], reply_markup=self.markup)
 
-    def buttons_handler(self, event):
-        if event.text == 'Send the test card':
-            card = self.current_user.get_card()
-            self.user_card[event.from_user.id] = card
-            self.send_card(event, card)
-        elif event.text == 'Test button':
-            self.markup = None
-            markup = telebot.types.ReplyKeyboardRemove(selective=False)
-            self.bot.send_message(event.chat.id, 'Кнопочка нажата', reply_markup=markup)
+        log.debug(f'Send the card {word_one} - {word_two}, TR:{card.today_repeat}, TRR:{card.today_reverse_repeat}')
+
+    def buttons_handler(self, event, user):
+        """
+        :param event: income message
+        :param user: current user
+        :return: handling user message text if it is in buttons list
+        """
+        if event.text == 'Repeat':
+            user.state = 'repeat'
+            if len(user.mindcards) > 0:
+                card = user.get_card(self.db)
+                self.user_card[event.from_user.id] = card
+                self.send_card(event, card)
+            else:
+                self.bot.send_message(event.chat.id, MESSAGE['no cards'], reply_markup=self.markup)
+        elif event.text == 'Create':
+            user.state = 'create'
+            # create buttons
+            self.markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+            new_word = telebot.types.KeyboardButton("Repeat")
+            translate = telebot.types.KeyboardButton('Translate')
+            # create buttons lines
+            self.markup.row(new_word, translate)
+            # self.markup = telebot.types.ReplyKeyboardRemove(selective=False)
+            self.bot.send_message(event.chat.id, MESSAGE['create'], reply_markup=self.markup)
         elif event.text == 'Remember':
             if self.user_card[event.from_user.id].today_repeat < 3:
                 self.user_card[event.from_user.id].today_repeat += 1
@@ -153,19 +202,27 @@ class Bot:
                 self.user_card[event.from_user.id].today_reverse_repeat += 1
             else:
                 print('У карточки больше 3 повторений')
-            card = self.current_user.get_card()
+            card = user.get_card(self.db)
             if card:
                 self.user_card[event.from_user.id] = card
                 self.send_card(event, card)
             else:
-                self.bot.send_message(event.chat.id, 'Вы всё повторили!')
+                self.bot.send_message(event.chat.id, MESSAGE['no cards'])
         elif event.text == 'Forgot':
             if self.user_card[event.from_user.id].today_repeat < 3:
                 self.user_card[event.from_user.id].today_repeat -= 1
             elif self.user_card[event.from_user.id].today_reverse_repeat < 3:
                 self.user_card[event.from_user.id].today_reverse_repeat -= 1
-        elif event.text == 'New word':
-            pass
+            self.user_card[event.from_user.id].repeat_mistake += 1
+        elif event.text == 'Translate':
+            user.state = 'translate'
+            # create buttons
+            self.markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+            repeat = telebot.types.KeyboardButton('Repeat')
+            new_word = telebot.types.KeyboardButton("Create")
+            # create buttons lines
+            self.markup.row(new_word, repeat)
+            self.bot.send_message(event.chat.id, MESSAGE['translate'], reply_markup=self.markup)
 
 
 if __name__ == '__main__':
