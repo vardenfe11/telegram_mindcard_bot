@@ -6,11 +6,6 @@ from peewee import *
 from collections import defaultdict
 
 log = logging.getLogger()
-# stream_handler = logging.StreamHandler()
-# stream_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-# log.addHandler(stream_handler)
-# log.setLevel(logging.INFO)
-# stream_handler.setLevel(logging.DEBUG)
 
 cards_db = SqliteDatabase('cards.db')
 
@@ -65,6 +60,7 @@ class DataBaseUpdater:
             else:
                 updated_card = Card.select().where(Card.card_id == card.card_id).get()
                 if updated_card:
+                    updated_card.user_id = card.user_id
                     updated_card.repeat_lvl = card.repeat_lvl
                     updated_card.repeat_date = card.repeat_date
                     updated_card.save()
@@ -119,3 +115,6 @@ class DataBaseUpdater:
         deleted_card = Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)).get()
         if deleted_card:
             deleted_card.delete_instance()
+
+if __name__ == '__main__':
+    base = DataBaseUpdater

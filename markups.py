@@ -1,43 +1,83 @@
-import telebot
-
-repeat = telebot.types.KeyboardButton('Repeat')
-new_word = telebot.types.KeyboardButton('Create')
-translate = telebot.types.KeyboardButton('Translate')
-translate_create = telebot.types.KeyboardButton('Create from translated')
-remember = telebot.types.KeyboardButton("Remember")
-forgot = telebot.types.KeyboardButton("Forgot")
-delete = telebot.types.KeyboardButton("Delete")
-yes = telebot.types.KeyboardButton("Yes")
-no = telebot.types.KeyboardButton("No")
+from telegram import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup
 
 
-markup_start = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-markup_start.add(repeat)
-markup_start.add(new_word)
-markup_start.add(translate)
+def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
+    """
+    Builds button menu from:
+    :param buttons: list of InlineKeyboardButton
+    :param n_cols: number of menu columns
+    :param header_buttons: menu is above message text
+    :param footer_buttons: menu is below message text
+    :return: args for InlineKeyboardMarkup
+    """
+    menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
+    if header_buttons:
+        menu.insert(0, [header_buttons])
+    if footer_buttons:
+        menu.append([footer_buttons])
+    return menu
 
-markup_send_card = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-# create buttons lines
-markup_send_card.row(remember, forgot)
-markup_send_card.row(new_word, translate, delete)
 
-# create buttons
-markup_translate = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-# create buttons lines
-markup_translate.row(new_word, repeat)
-markup_translate.row(translate_create)
+repeat = KeyboardButton('Repeat')
+new_word = KeyboardButton('Create')
+translate = KeyboardButton('Translate')
+# translate_create = KeyboardButton('Create from translated')
+remember = KeyboardButton("Remember")
+forgot = KeyboardButton("Forgot")
+delete = KeyboardButton("Delete")
+yes = KeyboardButton("Yes")
+no = KeyboardButton("No")
 
-markup_create = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-# create buttons lines
-markup_create.row(repeat, translate)
+markup_start = ReplyKeyboardMarkup(build_menu([repeat, new_word, translate], n_cols=2))
+markup_send_card = ReplyKeyboardMarkup([[remember, forgot], [new_word, translate, delete]])
+markup_translate = ReplyKeyboardMarkup(build_menu([new_word, repeat], n_cols=2))
+markup_delete = ReplyKeyboardMarkup(build_menu([yes, no, new_word, repeat], n_cols=2))
+markup_create = ReplyKeyboardMarkup([[repeat, translate]])
 
-markup_delete = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-markup_delete.row(yes, no)
-markup_delete.row(new_word, repeat)
 
+def translate_markup():
+    save_button = [
+        (InlineKeyboardButton(f'Save as card 💾', callback_data=f'save_translated save')),
+        (InlineKeyboardButton(f'Save reverse ↕💾', callback_data=f'save_translated reverse')),
+                   ]
+    message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=1))
+    return message_markup
+
+
+def page_markup(pages_list, button):
+    func_name = button[0]
+    new_buttons = []
+    next_page = int(button[2])
+    if next_page > 0:
+        new_buttons.append(InlineKeyboardButton(f'{next_page} ⬅',
+                                                callback_data=f'{func_name} {button[1]} {next_page - 1}'))
+    if next_page < len(pages_list) - 1:
+        new_buttons.append(InlineKeyboardButton(f'➡ {next_page + 2}',
+                                                callback_data=f'{func_name} {button[1]} {next_page + 1}'))
+    message_markup = InlineKeyboardMarkup(build_menu(new_buttons, n_cols=2))
+    return message_markup
+
+
+def card_markup(card):
+    func_name = 'repeat_cards'
+    buttons = [
+        InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
+                             callback_data=f'{func_name} {card.card_id} remember'),
+        InlineKeyboardButton(f'️❓{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot')
+    ]
+    message_markup = InlineKeyboardMarkup(build_menu(buttons, n_cols=2))
+    return message_markup
+
+
+reply_markup = InlineKeyboardMarkup(build_menu([
+    InlineKeyboardButton('⬅', callback_data='onboarding_step2_step1'),
+    InlineKeyboardButton('➡', callback_data='onboarding_step2_step3'),
+],
+    n_cols=2))
 markups = {'start': markup_start,
            'send_card': markup_send_card,
            'translate': markup_translate,
            'create': markup_create,
            'delete': markup_delete,
+           'inline': reply_markup
            }

@@ -5,4 +5,4 @@ MESSAGE = {'start': 'It is the bot for learning word by mind cards.\nPress butto
            'delete': 'Do you want to delete the Card?',
            'default': 'Choose what you need:',
            'help': '/load_all (or number of next days): load your cards\n/start : Show start menu'
-                   '/load_user_cards load your today cards, number of repeats/mistakes'}
+                   '\n/load_user_cards load your today cards with repeats/mistakes'}
