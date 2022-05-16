@@ -58,8 +58,8 @@ class DataBaseUpdater:
                 except Exception as error:
                     log.exception(f'Ошибка при записи в БД: {error}')
             else:
-                updated_card = Card.select().where(Card.card_id == card.card_id).get()
-                if updated_card:
+                if Card.select().where(Card.card_id == card.card_id):
+                    updated_card = Card.select().where(Card.card_id == card.card_id).get()
                     updated_card.user_id = card.user_id
                     updated_card.repeat_lvl = card.repeat_lvl
                     updated_card.repeat_date = card.repeat_date
@@ -77,7 +77,6 @@ class DataBaseUpdater:
             else:
                 days_delta = datetime.timedelta(days=int(days))
                 load_before_date = today_date + days_delta
-                print(load_before_date)
                 db_user_cards = Card.select().where((Card.repeat_date <= load_before_date) & (Card.user_id == user_id))
         else:
             db_user_cards = Card.select().where((Card.repeat_date <= today_date) & (Card.user_id == user_id))
@@ -109,12 +108,11 @@ class DataBaseUpdater:
             cards_return[card.user_id].append(card)
         return cards_return
 
-    def card_delete(self, user, card_id=None):
-        if not card_id:
-            card_id = user.context
-        deleted_card = Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)).get()
-        if deleted_card:
+    def card_delete(self, user, card_id):
+        if Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)):
+            deleted_card = Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)).get()
             deleted_card.delete_instance()
+
 
 if __name__ == '__main__':
     base = DataBaseUpdater

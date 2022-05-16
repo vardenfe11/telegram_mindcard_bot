@@ -28,19 +28,19 @@ delete = KeyboardButton("Delete")
 yes = KeyboardButton("Yes")
 no = KeyboardButton("No")
 
-markup_start = ReplyKeyboardMarkup(build_menu([repeat, new_word, translate], n_cols=2))
-markup_send_card = ReplyKeyboardMarkup([[remember, forgot], [new_word, translate, delete]])
-markup_translate = ReplyKeyboardMarkup(build_menu([new_word, repeat], n_cols=2))
-markup_delete = ReplyKeyboardMarkup(build_menu([yes, no, new_word, repeat], n_cols=2))
-markup_create = ReplyKeyboardMarkup([[repeat, translate]])
+markup_start = ReplyKeyboardMarkup(build_menu([repeat, new_word, translate], n_cols=3), resize_keyboard=True)
+markup_send_card = ReplyKeyboardMarkup([[remember, forgot], [new_word, translate, delete]], resize_keyboard=True)
+markup_translate = markup_start
+markup_delete = ReplyKeyboardMarkup(build_menu([yes, no, new_word, repeat], n_cols=2), resize_keyboard=True)
+markup_create = markup_start
 
 
 def translate_markup():
     save_button = [
         (InlineKeyboardButton(f'Save as card 💾', callback_data=f'save_translated save')),
-        (InlineKeyboardButton(f'Save reverse ↕💾', callback_data=f'save_translated reverse')),
-                   ]
-    message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=1))
+        (InlineKeyboardButton(f'↕', callback_data=f'save_translated reverse')),
+    ]
+    message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=2))
     return message_markup
 
 
@@ -49,12 +49,23 @@ def page_markup(pages_list, button):
     new_buttons = []
     next_page = int(button[2])
     if next_page > 0:
-        new_buttons.append(InlineKeyboardButton(f'{next_page} ⬅',
+        new_buttons.append(InlineKeyboardButton(f' ⬅',
                                                 callback_data=f'{func_name} {button[1]} {next_page - 1}'))
+    new_buttons.append(InlineKeyboardButton(f'{next_page + 1}',
+                                            callback_data=f'{func_name} {button[1]} {next_page}'))
     if next_page < len(pages_list) - 1:
-        new_buttons.append(InlineKeyboardButton(f'➡ {next_page + 2}',
+        new_buttons.append(InlineKeyboardButton(f'➡ ',
                                                 callback_data=f'{func_name} {button[1]} {next_page + 1}'))
-    message_markup = InlineKeyboardMarkup(build_menu(new_buttons, n_cols=2))
+    message_markup = InlineKeyboardMarkup(build_menu(new_buttons, n_cols=3))
+    return message_markup
+
+
+def delete_markup(button):
+    func_name = button[0]
+    message_markup = InlineKeyboardMarkup(build_menu([
+        (InlineKeyboardButton(f'✔️Yes', callback_data=f'{func_name} {button[1]} yes')),
+        (InlineKeyboardButton(f'✖️No', callback_data=f'{func_name} {button[1]} no')),
+    ], n_cols=2), resize_keyboard=True)
     return message_markup
 
 
@@ -63,7 +74,9 @@ def card_markup(card):
     buttons = [
         InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
                              callback_data=f'{func_name} {card.card_id} remember'),
-        InlineKeyboardButton(f'️❓{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot')
+        InlineKeyboardButton(f'️❓{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot'),
+        InlineKeyboardButton(f'🔈', callback_data=f'{func_name} {card.card_id} listen'),
+        InlineKeyboardButton(f'❌', callback_data=f'{func_name} {card.card_id} delete')
     ]
     message_markup = InlineKeyboardMarkup(build_menu(buttons, n_cols=2))
     return message_markup

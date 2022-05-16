@@ -1,5 +1,5 @@
 MESSAGE = {'start': 'It is the bot for learning word by mind cards.\nPress button for start of look /help for more',
-           'no cards': 'You have no cards for repeat, wait when the time comes',
+           'no cards': '✔ You have repeated all the words!',
            'create': 'For create new card write the first word and the second on the next line',
            'translate': 'Write a word for translate to russian by Google translate',
            'delete': 'Do you want to delete the Card?',
