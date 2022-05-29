@@ -4,13 +4,12 @@ import os
 import random
 from functools import reduce
 from gtts import gTTS
-from langdetect import detect
-
-from markups import markups, page_markup, card_markup, translate_markup, delete_markup
+from markups import markups
 from googletrans import Translator
 from db_manager import DataBaseUpdater
 from db_manager import MindCard
-from settings import MESSAGE
+from settings import *
+from handlers import *
 from telegram_token import TOKEN
 from collections import defaultdict
 
@@ -46,6 +45,8 @@ class User:
         self.state = ''
         self.repeat_time = datetime.datetime.today()
         self.db_cards = None
+        self.pile_size = 20
+        self.mindcards_queuing = []
 
     def get_card_by_id(self, card_id):
         for card in self.mindcards:
@@ -54,9 +55,18 @@ class User:
         for card in self.mindcards_delayed:
             if card.card_id == card_id:
                 return card
+        for card in self.mindcards_queuing:
+            if card.card_id == card_id:
+                self.mindcards.append(card)
+                self.mindcards_queuing.remove(card)
+                return card
 
     def get_card(self, db):
         # two cards list for get all cards after repeat its again
+        while (len(self.mindcards) + len(self.mindcards_delayed)) < self.pile_size and len(self.mindcards_queuing) > 0:
+            card = self.mindcards_queuing[0]
+            self.mindcards.append(card)
+            self.mindcards_queuing.remove(card)
         while len(self.mindcards) > 0 or len(self.mindcards_delayed) > 0:
             if len(self.mindcards) == 0 and len(self.mindcards_delayed) > 0:
                 self.mindcards = self.mindcards_delayed
@@ -68,10 +78,13 @@ class User:
                 self.repeat_time = datetime.datetime.today()
                 return card
             else:
-                if card.repeat_mistake < 2 and card.repeat_lvl < 4:
+                if (card.repeat_mistake < 2 and card.repeat_lvl < 4) or card.repeat_mistake == 0:
                     card.repeat_lvl += 1
                 db.update_base([card])
                 self.mindcards.remove(card)
+                card = self.get_card(db)
+                if card:
+                    return card
 
 
 def default_markup():
@@ -124,7 +137,7 @@ class Bot:
         self.users[user_id] = user
         users_db_cards = self.db.load_base(user)
         if users_db_cards:
-            self.users[user_id].mindcards = users_db_cards
+            self.users[user_id].mindcards_queuing = users_db_cards
         log.info('New user is created, user_id: %s', user_id)
 
     def on_event(self, update, context):
@@ -132,7 +145,6 @@ class Bot:
             if datetime.datetime.today().hour > 8:
                 self.repeat = datetime.date.today()
                 self.load_today_cards(update, context)
-                self.send_today_cards()
         user_id = update.message.from_user.id
         if update:
             if user_id not in self.users:
@@ -153,6 +165,12 @@ class Bot:
                 for card in user.mindcards:
                     if card.card_id == num:
                         user.mindcards.remove(card)
+                for card in user.mindcards_delayed:
+                    if card.card_id == num:
+                        user.mindcards_delayed.remove(card)
+                for card in user.mindcards_queuing:
+                    if card.card_id == num:
+                        user.mindcards_queuing.remove(card)
                 self.db.card_delete(user, num)
             elif not button_click:
                 self.handle_text(update, context, user)
@@ -187,7 +205,7 @@ class Bot:
             translated_message = translator.translate(update.message.text, dest='ru')
             message_text = f'{update.message.text}\n{translated_message.text}'
             context.bot.send_message(update.effective_chat.id, message_text,
-                                     reply_markup=translate_markup())
+                                     reply_markup=markups['translate_markup']())
         elif user.state == 'create':
             self.new_card(update, context, user)
         else:
@@ -199,7 +217,6 @@ class Bot:
             message = update.message.text
             send_saved_card = True
         word_list = message.split(sep='\n')
-        print(word_list, message)
         if len(word_list) > 1:
             if reverse:
                 word_two = word_list[0]
@@ -210,14 +227,14 @@ class Bot:
             card = MindCard(word_one=word_one,
                             word_two=word_two,
                             user_id=user.user_id)
-            user.mindcards.append(card)
+            user.mindcards_queuing.append(card)
             self.db.update_base([card])
             if send_saved_card:
-                send_message = f'✔ Saved 1️⃣{word_one}2️⃣{word_two}\n'
+                send_message = f'✓💾 {word_one}⇆{word_two}\n'
                 context.bot.send_message(update.effective_chat.id, send_message,
                                          reply_markup=self.markup[update.message.from_user.id])
         else:
-            context.bot.send_message(update.effective_chat.id, 'Card format error',
+            context.bot.send_message(update.effective_chat.id, '❗️Card format error',
                                      reply_markup=self.markup[update.message.from_user.id])
 
     def repeat_cards(self, update: Update, context: CallbackContext, button=None):
@@ -235,26 +252,24 @@ class Bot:
                 time_bonus = 0
                 card = self.user_card[user.user_id]
                 if card:
-                    if card.repeat_lvl > 0:
+                    if card.repeat_lvl >= 0:
                         if (user.repeat_time + datetime.timedelta(seconds=2)) > answer_time and \
                                 card.repeat_mistake == 0:
                             time_bonus = 2
                         elif (user.repeat_time + datetime.timedelta(seconds=4)) > answer_time and \
                                 card.repeat_mistake == 0:
                             time_bonus = 1
-                    if card.today_repeat < \
-                            (3 + card.repeat_mistake / 2):
+                    if card.today_repeat < (6 + card.repeat_mistake / 2):
                         card.today_repeat += 1 + time_bonus
-                    elif card.today_reverse_repeat < \
-                            (3 + card.repeat_mistake / 2):
+                    elif card.today_reverse_repeat < (6 + card.repeat_mistake / 2):
                         card.today_reverse_repeat += 1 + time_bonus
                     if button_answer == 'forgot':
                         card.repeat_mistake += 1
                     self.user_card[user.user_id] = user.get_card(self.db)
             elif button_answer == 'delete' and self.user_card[user.user_id]:
                 user.state = 'delete'
-                inline_markup = delete_markup(button)
-                send_message = f'{self.user_card[user.user_id].word_one}\n{self.user_card[user.user_id].word_two}\n' \
+                inline_markup = markups['delete_markup'](button)
+                send_message = f'→{self.user_card[user.user_id].word_one}\n←{self.user_card[user.user_id].word_two}\n' \
                                f'Delete the card⁉️'
                 return [send_message, inline_markup, None]
             elif button_answer == 'yes' or button_answer == 'no':
@@ -265,11 +280,11 @@ class Bot:
             elif button_answer == 'listen' and self.user_card[user.user_id]:
                 if not os.path.exists('audio'):
                     os.makedirs('audio')
-                lang = detect(self.user_card[user.user_id].word_one)
-                supported_langs = ['ru', 'uk', 'en']
-                if lang not in supported_langs:
+                word = update.callback_query.message.text.split(sep='\n')[0]
+                lang = detect_lang(word)
+                if not lang:
                     lang = 'en'
-                word_one_tts = gTTS(self.user_card[user.user_id].word_one, lang=lang)
+                word_one_tts = gTTS(word, lang=lang)
                 word_one_tts.save(f'audio/{user.user_id}.mp3')
                 voice_message = open(f'audio/{user.user_id}.mp3', 'rb')
                 context.bot.send_voice(chat_id=update.effective_chat.id, voice=voice_message)
@@ -280,8 +295,8 @@ class Bot:
 
         if self.user_card[user.user_id] and user.state == 'repeat':
             card = self.user_card[user.user_id]
-            inline_markup = card_markup(card)
-            if (card.today_repeat - card.repeat_mistake / 2) < 3:
+            inline_markup = markups['card_markup'](card)
+            if (card.today_repeat - card.repeat_mistake) < 3:
                 word_one, word_two = card.word_one, card.word_two
             else:
                 word_two, word_one = card.word_one, card.word_two
@@ -303,9 +318,9 @@ class Bot:
             self.markup[user.user_id] = markups['start']
             context.bot.send_message(update.effective_chat.id,
                                      MESSAGE['no cards'],
-                                     reply_markup=self.markup[user.user_id])
+                                     reply_markup=markups['donate_markup']())
         else:
-            return [MESSAGE['no cards'], None, None]
+            return [MESSAGE['no cards'], markups['donate_markup'](), None]
 
     def buttons_handler(self, update, context, user):
         user_id = update.message.from_user.id
@@ -351,26 +366,26 @@ class Bot:
         if num == 'all' or num.isnumeric():
             users_db_cards = self.db.load_base(user, days=num)
             users_db_cards.reverse()
-            db_cards = [[f'{len(users_db_cards)} cards:']]
+            db_cards = [[f'✎ {len(users_db_cards)} cards:']]
             page_rows = 20
             for card in users_db_cards:
                 if len(db_cards[len(db_cards) - 1]) < page_rows:
                     db_cards[len(db_cards) - 1].append(
-                        f'\nid:{card.card_id}:{card.word_one}-{card.word_two} lvl:{card.repeat_lvl}')
+                        f'\n·{card.card_id} {card.word_one}⇄{card.word_two}⟳{2 ** card.repeat_lvl}')
                 else:
-                    db_cards.append([f'id:{card.card_id}:{card.word_one}-{card.word_two} lvl:{card.repeat_lvl}'])
+                    db_cards.append([f'·{card.card_id} {card.word_one}⇄{card.word_two}⟳{2 ** card.repeat_lvl}'])
 
             if button:
                 page = int(button[2])
                 if page > len(db_cards) - 1:
                     page = 0
-                    markup = page_markup(pages_list=db_cards, button=[f'load', num, 0])
+                    markup = markups['page_markup'](pages_list=db_cards, button=[f'load', num, 0])
                 else:
-                    markup = page_markup(pages_list=db_cards, button=button)
+                    markup = markups['page_markup'](pages_list=db_cards, button=button)
                 message = reduce(lambda a, x: a + x, db_cards[page])
                 return [message, markup, None]
             else:
-                markup = page_markup(pages_list=db_cards, button=[f'load', num, 0])
+                markup = markups['page_markup'](pages_list=db_cards, button=[f'load', num, 0])
                 message = reduce(lambda a, x: a + x, db_cards[0])
                 context.bot.send_message(update.effective_chat.id, message, reply_markup=markup)
 
@@ -382,15 +397,30 @@ class Bot:
         self.user_check(update)
         user = self.users[update.callback_query.from_user.id]
         message = update.callback_query.message.text
+        message_edit = None
+        markup = None
         if button[1] == 'reverse':
-            markup = translate_markup()
+            markup = markups['translate_markup']()
             message_split = message.split(sep='\n')
             message_edit = message_split[1] + '\n' + message_split[0]
-        else:
+        elif button[1] == 'save':
             self.new_card(update, context, user, message=message)
-            message_edit = message + '\n✔ Saved'
-            markup = None
-        return [message_edit, markup, None]
+            message_split = message.split(sep='\n')
+            message_edit = f'→{message_split[0]}\n←{message_split[1]}\n✓ Saved'
+        elif button[1] == 'flag':
+            markup = markups['translate_markup']()
+            message_split = message.split(sep='\n')
+            flag_list = []
+            for tag, flag in FLAGS.items():
+                flag_list.append(flag)
+            if message_split[0][-2:] in flag_list:
+                message_edit = message_split[0][:-2] + '\n' + message_split[1]
+            else:
+                lang = detect_lang(message_split[1])
+                if lang in FLAGS:
+                    message_edit = message_split[0] + FLAGS[lang] + '\n' + message_split[1]
+        if message_edit:
+            return [message_edit, markup, None]
 
     def card_delete(self, user):
         card = self.user_card[user.user_id]
@@ -410,6 +440,10 @@ class Bot:
                 log.debug(f'Today card {db_card.word_one} - {db_card.word_two}, UID:{db_card.user_id}')
                 if db_card.user_id in self.users:
                     card_exist = False
+                    for card in self.users[db_card.user_id].mindcards_queuing:
+                        if card.card_id == db_card.card_id:
+                            card_exist = True
+                            log.debug(f'card is exist {card.word_one} - {card.word_two}, UID:{card.user_id}')
                     for card in self.users[db_card.user_id].mindcards_delayed:
                         if card.card_id == db_card.card_id:
                             card_exist = True
@@ -418,23 +452,21 @@ class Bot:
                         if card.card_id == db_card.card_id:
                             card_exist = True
                             log.debug(f'card is exist {card.word_one} - {card.word_two}, UID:{card.user_id}')
-                            # self.users[db_card.user_id].mindcards.remove(card)
                     if not card_exist:
-                        self.users[db_card.user_id].mindcards.append(db_card)
+                        self.users[db_card.user_id].mindcards_queuing.append(db_card)
                 else:
                     self.new_user(db_card.user_id)
-                    self.users[db_card.user_id].mindcards.append(db_card)
-
-    def send_today_cards(self):
-        pass
+                    self.users[db_card.user_id].mindcards_queuing.append(db_card)
 
     def load_user_cards(self, update: Update, context: CallbackContext, button=None):
         user = self.user_check(update)
-        user_cards = [[f'{len(user.mindcards)} cards:']]
+        all_cards = user.mindcards + user.mindcards_delayed + user.mindcards_queuing
+        user_cards = [[f'✎ {len(all_cards)} cards:']]
         page_rows = 20
-        for mindcard in user.mindcards + user.mindcards_delayed:
-            user_cards_line = f'\n{mindcard.card_id}: {mindcard.word_one} - {mindcard.word_two} ' \
-                              f'{mindcard.today_repeat}|{mindcard.today_reverse_repeat}|{mindcard.repeat_mistake}'
+        for mindcard in all_cards:
+            user_cards_line = f'\n·{mindcard.card_id} {mindcard.word_one}⇄{mindcard.word_two} ' \
+                              f'✓{mindcard.today_repeat + mindcard.today_reverse_repeat}✗{mindcard.repeat_mistake}' \
+                              f'⟳{2 ** mindcard.repeat_lvl}'
             if len(user_cards[len(user_cards) - 1]) < page_rows:
                 user_cards[len(user_cards) - 1].append(user_cards_line)
             else:
@@ -443,54 +475,39 @@ class Bot:
             page = int(button[2])
             if page > len(user_cards) - 1:
                 page = 0
-                markup = page_markup(pages_list=user_cards, button=[f'user_cards', 'None', 0])
+                markup = markups['page_markup'](pages_list=user_cards, button=[f'user_cards', 'None', 0])
             else:
-                markup = page_markup(pages_list=user_cards, button=button)
+                markup = markups['page_markup'](pages_list=user_cards, button=button)
             message = reduce(lambda a, x: a + x, user_cards[page])
             return [message, markup, None]
         else:
-            markup = page_markup(pages_list=user_cards, button=[f'user_cards', 'None', 0])
+            markup = markups['page_markup'](pages_list=user_cards, button=[f'user_cards', 'None', 0])
             message = reduce(lambda a, x: a + x, user_cards[0])
             context.bot.send_message(update.effective_chat.id, message, reply_markup=markup)
-
-    def button_compare(self, message_edit, keyboard2):
-        button_coincidence = False
-        if message_edit[1]:
-            keyboard1 = message_edit[1].inline_keyboard
-            if len(keyboard1) == len(keyboard2):
-                for line_num, button_line in enumerate(keyboard2):
-                    if len(keyboard1[line_num]) == len(button_line):
-                        for num, button in enumerate(button_line):
-                            if button.text != keyboard1[line_num][num].text or \
-                                    button.callback_data != keyboard1[line_num][num].callback_data:
-                                button_coincidence = True
-        else:
-            button_coincidence = True
-        return button_coincidence
 
     def button(self, update: Update, context: CallbackContext):
         # buttons callback handler
         self.user_check(update)
         query = update.callback_query
         button = query.data.split()
-        logging.info('Pressed button: %s', button)
+        logging.debug('Pressed button: %s', button)
         query.answer()
         if button[0] in self.button_handlers:
             message_edit = self.button_handlers[button[0]](update, context, button=button)
-            logging.info('Edited message: %s', button)
-            button_compare = self.button_compare(message_edit,
-                                                 update.callback_query.message.reply_markup.inline_keyboard)
-            if message_edit[0] != update.callback_query.message.text or button_compare:
-                if message_edit[2] and message_edit[1]:
-                    query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1],
-                                            entities=[message_edit[2]])
-                elif message_edit[1]:
-                    query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1])
-                elif message_edit[2]:
-                    query.edit_message_text(text=message_edit[0], entities=[message_edit[2]])
-                else:
-                    query.edit_message_text(text=message_edit[0])
-
+            logging.debug('Edited message: %s', button)
+            if message_edit:
+                button_compare_result = button_compare(message_edit,
+                                                       update.callback_query.message.reply_markup.inline_keyboard)
+                if message_edit[0] != update.callback_query.message.text or button_compare_result:
+                    if message_edit[2] and message_edit[1]:
+                        query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1],
+                                                entities=[message_edit[2]])
+                    elif message_edit[1]:
+                        query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1])
+                    elif message_edit[2]:
+                        query.edit_message_text(text=message_edit[0], entities=[message_edit[2]])
+                    else:
+                        query.edit_message_text(text=message_edit[0])
 
 
 if __name__ == '__main__':
