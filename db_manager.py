@@ -8,8 +8,10 @@ from collections import defaultdict
 log = logging.getLogger()
 
 cards_db = SqliteDatabase('cards.db')
+users_db = SqliteDatabase('users.db')
 
 
+# Cards class for telegram bot
 class MindCard:
     def __init__(self, word_one, word_two, user_id, repeat_lvl=-1, card_id=None):
         self.word_one = word_one
@@ -22,6 +24,7 @@ class MindCard:
         self.card_id = card_id
 
 
+# Cards class for DB
 class Card(Model):
     user_id = IntegerField()
     card_id = AutoField()
@@ -35,6 +38,111 @@ class Card(Model):
         database = cards_db
 
 
+# User class for DB
+class User_db(Model):
+    user_id = IntegerField(unique=True)
+    stack_size = IntegerField()
+    interface_lang = IntegerField()
+    first_lang = IntegerField()
+    second_lang = IntegerField()
+    score = IntegerField()
+    nickname = CharField()
+    nickname_change = IntegerField()
+    state = CharField()
+
+    class Meta:
+        database = users_db
+
+
+# Users DB manager
+class UserUpdater:
+    def __int__(self):
+        self.user = None
+        if not os.path.exists('users.db'):
+            User_db.create_table(User_db)
+
+    def save(self, user):
+        # Save user from bot to DB
+        if User_db.select().where(User_db.user_id == user.user_id):
+            db_user = User_db.select().where(User_db.user_id == user.user_id).get()
+            db_user.user_id = user.user_id
+            db_user.stack_size = user.stack_size
+            db_user.interface_lang = user.interface_lang
+            db_user.first_lang = user.first_lang
+            db_user.second_lang = user.second_lang
+            db_user.state = user.state
+            db_user.score = user.score
+            db_user.nickname = user.nickname
+            db_user.nickname_change = user.nickname_change
+            db_user.save()
+        else:
+            self.create_user(user)
+
+    def load(self, user):
+        # Update user data from DB
+        if User_db.select().where(User_db.user_id == user.user_id):
+            db_user = User_db.select().where(User_db.user_id == user.user_id).get()
+            user.stack_size = db_user.stack_size
+            user.interface_lang = db_user.interface_lang
+            user.first_lang = db_user.first_lang
+            user.second_lang = db_user.second_lang
+            user.state = db_user.state
+            user.score = db_user.score
+            user.nickname = db_user.nickname
+            user.nickname_change = db_user.nickname_change
+        else:
+            self.create_user(user)
+
+    def create_user(self, user):
+        # Create user in DB from bot user class
+        try:
+            User_db.create(
+                user_id=user.user_id,
+                stack_size=user.stack_size,
+                interface_lang=user.interface_lang,
+                first_lang=user.first_lang,
+                second_lang=user.second_lang,
+                state=user.state,
+                score=user.score,
+                nickname=user.nickname,
+                nickname_change=user.nickname_change,
+            )
+        except Exception as error:
+            log.exception(f'Ошибка при записи в БД: {error}')
+
+    def load_stats(self, users=None):
+        # Load weekly statistic from DB
+        # stats = []
+        if User_db.select().where(User_db.score > 0):
+            score_user_list = sorted(User_db.select().where(User_db.score > 0), key=lambda u: u.score, reverse=True)
+
+            if len(score_user_list) > 0:
+                if users:
+                    if score_user_list[0].user_id in users:
+                        users[score_user_list[0].user_id].nickname_change += 1
+                        users[score_user_list[0].user_id].save()
+                    else:
+                        score_user_list[0].nickname_change += 1
+                        score_user_list[0].save()
+                    for num, db_user in enumerate(score_user_list):
+                        if db_user.user_id in users:
+                            users[db_user.user_id].score = int(db_user.score / 10)
+                            users[db_user.user_id].save()
+                        else:
+                            db_user.score = int(db_user.score / 10)
+                            db_user.save()
+                else:
+                    return score_user_list
+            else:
+                return None
+
+        # else:
+        #     stats += MESSAGE[user.interface_lang]['name_change']['no one']
+
+
+
+
+# Cards DB manager
 class DataBaseUpdater:
     def __init__(self):
         self.loaded_data = []
@@ -42,6 +150,7 @@ class DataBaseUpdater:
             Card.create_table(Card)
 
     def update_base(self, mindcards):
+        # Update DB data for mindcards list
         today_date = datetime.date.today()
         for card in mindcards:
             card.repeat_date = today_date + datetime.timedelta(days=int(2 ** card.repeat_lvl))
@@ -68,6 +177,7 @@ class DataBaseUpdater:
                     log.exception(f'Ошибка при зaгрузке карточки #{card.card_id} из БД')
 
     def load_base(self, user, days=None):
+        # Load cards for N repeat days from DB for /load_N bot command
         self.loaded_data = []
         user_id = user.user_id
         today_date = datetime.date.today()
@@ -82,8 +192,6 @@ class DataBaseUpdater:
             db_user_cards = Card.select().where((Card.repeat_date <= today_date) & (Card.user_id == user_id))
         if db_user_cards:
             for db_card in db_user_cards:
-                # print(db_card.repeat_date)
-                # print(f'{db_card.repeat_date} <= {today_date}', db_card.repeat_date <= today_date)
                 card = MindCard(word_one=db_card.word_one,
                                 word_two=db_card.word_two,
                                 user_id=user.user_id,
@@ -93,6 +201,8 @@ class DataBaseUpdater:
         return self.loaded_data
 
     def load_today_cards(self):
+        # Load list of cards where Card.repeat_date <= today_date from DB
+        # Turn to MindCard list and return it
         def def_value():
             return []
 
@@ -109,10 +219,12 @@ class DataBaseUpdater:
         return cards_return
 
     def card_delete(self, user, card_id):
+        # Delete card by ID from DB for /delete_ID bot command
         if Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)):
             deleted_card = Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)).get()
             deleted_card.delete_instance()
 
 
 if __name__ == '__main__':
-    base = DataBaseUpdater
+    base = UserUpdater()
+    User_db.create_table(User_db)

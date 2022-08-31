@@ -1,5 +1,6 @@
 from telegram import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup
 from telegram_token import *
+from settings import *
 
 
 def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
@@ -22,7 +23,6 @@ def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
 repeat = KeyboardButton('Repeat')
 new_word = KeyboardButton('Create')
 translate = KeyboardButton('Translate')
-# translate_create = KeyboardButton('Create from translated')
 remember = KeyboardButton("Remember")
 forgot = KeyboardButton("Forgot")
 delete = KeyboardButton("Delete")
@@ -37,16 +37,18 @@ markup_create = markup_start
 
 
 def translate_markup():
+    # keyboard for translated words
     save_button = [
         (InlineKeyboardButton(f'💾', callback_data=f'save_translated save')),
         (InlineKeyboardButton(f'↻', callback_data=f'save_translated reverse')),
-        (InlineKeyboardButton(f'🏁', callback_data=f'save_translated flag')),
+        (InlineKeyboardButton(f'🏴‍☠', callback_data=f'save_translated flag')),
     ]
     message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=3))
     return message_markup
 
 
 def donate_markup():
+    # keyboard for message after user repeated all today cards
     save_button = [
         (InlineKeyboardButton('Yoomoney', url=YOOMONEY)),
         (InlineKeyboardButton('PayPal', url=PAYPAL)),
@@ -56,18 +58,158 @@ def donate_markup():
 
 
 def page_markup(pages_list, button):
+    # keyboard for pages in long lists (/load, /load_today_cards, /help bot commands)
     func_name = button[0]
     new_buttons = []
     next_page = int(button[2])
-    if next_page > 0:
+    if next_page == 0 and len(pages_list) > 2:
+        new_buttons.append(InlineKeyboardButton(f'▷▷',
+                                                callback_data=f'{func_name} {button[1]} {len(pages_list) - 1}'))
+    elif next_page != 0 and len(pages_list) > 1:
         new_buttons.append(InlineKeyboardButton(f'◁',
                                                 callback_data=f'{func_name} {button[1]} {next_page - 1}'))
-    new_buttons.append(InlineKeyboardButton(f'{next_page + 1}',
-                                            callback_data=f'{func_name} {button[1]} {next_page}'))
-    if next_page < len(pages_list) - 1:
+    if len(pages_list) > 1:
+        new_buttons.append(InlineKeyboardButton(f'{next_page + 1}',
+                                                callback_data=f'{func_name} {button[1]} {next_page}'))
+    else:
+        new_buttons.append(InlineKeyboardButton(f'↻',
+                                                callback_data=f'{func_name} {button[1]} {next_page}'))
+
+    if next_page == len(pages_list) - 1 and len(pages_list) > 2:
+        new_buttons.append(InlineKeyboardButton(f'◁◁',
+                                                callback_data=f'{func_name} {button[1]} 0'))
+    elif next_page != len(pages_list) - 1 and len(pages_list) > 1:
         new_buttons.append(InlineKeyboardButton(f'▷',
                                                 callback_data=f'{func_name} {button[1]} {next_page + 1}'))
     message_markup = InlineKeyboardMarkup(build_menu(new_buttons, n_cols=3))
+    return message_markup
+
+
+def list_step(proc_list, current_step, step_change):
+    """
+    Cycle change from list
+    :param proc_list: list of changed parameters
+    :param current_step: currents value (from user settings)
+    :param step_change: change value (+1, -1) for button
+    :return: list value number for changed parametr
+    """
+    step_change = int(step_change)
+    if current_step + step_change >= len(proc_list):
+        next_step = current_step + step_change - len(proc_list)
+    elif current_step + step_change < 0:
+        next_step = len(proc_list) + current_step + step_change
+    else:
+        next_step = current_step + step_change
+    return next_step
+
+
+def settings_markup(user, button):
+    # keyboard for /settings bot menu
+    func_name = button[0]
+    if button:
+        if button[1] == 'stack_size':
+            stack_change = int(button[2])
+            if 0 < (user.stack_size + stack_change) <= 1000:
+                user.stack_size += stack_change
+                user.save()
+        elif button[1] == 'interface_lang':
+            new_lang = int(button[2])
+            user.interface_lang = new_lang
+            user.save()
+        elif button[1] == 'first_lang':
+            new_lang = int(button[2])
+            user.first_lang = new_lang
+            user.save()
+        elif button[1] == 'second_lang':
+            new_lang = int(button[2])
+            user.second_lang = new_lang
+            user.save()
+        elif button[1] == 'add_cards':
+            if button[2] == 'true':
+                user.add_cards_to_stack = True
+            elif button[2] == 'false':
+                user.add_cards_to_stack = False
+            user.save()
+
+    def add_card_button(check):
+        if check == True:
+            return InlineKeyboardButton('✓', callback_data=f'{func_name} add_cards false')
+        else:
+            return InlineKeyboardButton(' ', callback_data=f'{func_name} add_cards true')
+
+    interface_lang_steps = [
+        list_step(INTERFACE['interface_langs'], user.interface_lang, -1),
+        list_step(INTERFACE['interface_langs'], user.interface_lang, 1)
+    ]
+    first_lang_steps = [
+        list_step(INTERFACE['translate_langs'], user.first_lang, -1),
+        list_step(INTERFACE['translate_langs'], user.first_lang, 1)
+    ]
+    second_lang_steps = [
+        list_step(INTERFACE['translate_langs'], user.second_lang, -1),
+        list_step(INTERFACE['translate_langs'], user.second_lang, 1)
+    ]
+    message_markup = InlineKeyboardMarkup(build_menu([
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][0],
+                             callback_data=f'{func_name} None None'),
+        InlineKeyboardButton('◁', callback_data=f'{func_name} stack_size -5'),
+        InlineKeyboardButton(user.stack_size, callback_data=f'{func_name} None None'),
+        InlineKeyboardButton('▷', callback_data=f'{func_name} stack_size +5'),
+
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][1], callback_data=f'{func_name} None None'),
+        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][interface_lang_steps[0]]] + '◁',
+                             callback_data=f'{func_name} interface_lang {interface_lang_steps[0]}'),
+        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][user.interface_lang]] +
+                             INTERFACE['interface_langs'][user.interface_lang],
+                             callback_data=f'{func_name} None None'),
+        InlineKeyboardButton('▷' + FLAGS[INTERFACE['interface_langs'][interface_lang_steps[1]]],
+                             callback_data=f'{func_name} interface_lang {interface_lang_steps[1]}'),
+
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][2], callback_data=f'{func_name} None None'),
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][first_lang_steps[0]]] + '◁',
+                             callback_data=f'{func_name} first_lang {first_lang_steps[0]}'),
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][user.first_lang]] +
+                             INTERFACE['translate_langs'][user.first_lang], callback_data=f'{func_name} None None'),
+        InlineKeyboardButton('▷' + FLAGS[INTERFACE['translate_langs'][first_lang_steps[1]]],
+                             callback_data=f'{func_name} first_lang {first_lang_steps[1]}'),
+
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][3], callback_data=f'{func_name} None None'),
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][second_lang_steps[0]]] + '◁',
+                             callback_data=f'{func_name} second_lang {second_lang_steps[0]}'),
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][user.second_lang]] +
+                             INTERFACE['translate_langs'][user.second_lang],
+                             callback_data=f'{func_name} None None'),
+        InlineKeyboardButton('▷' + FLAGS[INTERFACE['translate_langs'][second_lang_steps[1]]],
+                             callback_data=f'{func_name} second_lang {second_lang_steps[1]}'),
+
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][5][0], callback_data=f'{func_name} None None'),
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][5][1], callback_data=f'{func_name} None None'),
+        InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][5][2], callback_data=f'{func_name} None None'),
+        add_card_button(user.add_cards_to_stack),
+    ], n_cols=4), resize_keyboard=False)
+
+    return message_markup
+
+
+def fast_lang_markup(user, button):
+    # keyboard for /settings bot menu
+    func_name = button[0]
+    if button:
+        if button[1] == 'interface_lang':
+            new_lang = int(button[2])
+            user.interface_lang = new_lang
+            user.save()
+
+    interface_lang_steps = [
+        list_step(INTERFACE['interface_langs'], user.interface_lang, -1),
+        list_step(INTERFACE['interface_langs'], user.interface_lang, 1)
+    ]
+
+    message_markup = InlineKeyboardMarkup(build_menu([
+        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][interface_lang_steps[0]]] + '◁',
+                             callback_data=f'{func_name} interface_lang {interface_lang_steps[0]}'),
+    ], n_cols=1), resize_keyboard=False)
+
     return message_markup
 
 
@@ -80,33 +222,67 @@ def delete_markup(button):
     return message_markup
 
 
-def card_markup(card):
-    func_name = 'repeat_cards'
-    buttons = [
-        InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
-                             callback_data=f'{func_name} {card.card_id} remember'),
-        InlineKeyboardButton(f'✖{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot'),
-        InlineKeyboardButton(f'🎵', callback_data=f'{func_name} {card.card_id} listen'),
-        InlineKeyboardButton(f'🚮', callback_data=f'{func_name} {card.card_id} delete')
-    ]
-    message_markup = InlineKeyboardMarkup(build_menu(buttons, n_cols=2))
+def change_name_markup(user):
+    change_name_text = INTERFACE[user.interface_lang]['settings']['change_name'] + f'({user.nickname_change})'
+    cancel_text = INTERFACE[user.interface_lang]['settings']['cancel']
+    message_markup = InlineKeyboardMarkup(build_menu([
+        (InlineKeyboardButton(f'{change_name_text}', callback_data=f'change_name None yes')),
+        (InlineKeyboardButton(f'{cancel_text}', callback_data=f'change_name None no')),
+    ], n_cols=2), resize_keyboard=True)
     return message_markup
 
-#
-# reply_markup = InlineKeyboardMarkup(build_menu([
-#     InlineKeyboardButton('⬅', callback_data='onboarding_step2_step1'),
-#     InlineKeyboardButton('➡', callback_data='onboarding_step2_step3'),
-# ],
-#     n_cols=2))
+
+def card_markup(card, back=None):
+    func_name = 'repeat_cards'
+    if (card.today_repeat - card.repeat_mistake) < 3:
+        word_one, word_two = card.word_one, card.word_two
+    else:
+        word_two, word_one = card.word_one, card.word_two
+    if back:
+        word = word_two
+        reverse = 'back'
+    else:
+        word = word_one
+        reverse = 'front'
+    buttons = [
+        [
+            InlineKeyboardButton(f'\n{word}\n',
+                                 callback_data=f'{func_name} {card.card_id} {reverse}'),
+        ],
+        [
+            InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
+                                 callback_data=f'{func_name} {card.card_id} remember'),
+            InlineKeyboardButton(f'✖{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot')
+        ],
+        [
+            InlineKeyboardButton(f'🎵', callback_data=f'{func_name} {card.card_id} listen{reverse}'),
+            InlineKeyboardButton(f'🚮', callback_data=f'{func_name} {card.card_id} delete')
+        ]
+    ]
+    message_markup = InlineKeyboardMarkup(buttons)
+    return message_markup
+
+
+def message_delete(word):
+    save_button = [
+        (InlineKeyboardButton(f'{word} ✖', callback_data=f'message_delete None None')),
+    ]
+    message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=2))
+    return message_markup
+
+
 markups = {'start': markup_start,
            'send_card': markup_send_card,
            'translate': markup_translate,
            'create': markup_create,
            'delete': markup_delete,
-           # 'inline': reply_markup,
            'translate_markup': translate_markup,
            'delete_markup': delete_markup,
            'card_markup': card_markup,
            'page_markup': page_markup,
            'donate_markup': donate_markup,
+           'settings': settings_markup,
+           'message_delete': message_delete,
+           'change_name_markup': change_name_markup,
+           'fast_lang_markup': fast_lang_markup,
            }

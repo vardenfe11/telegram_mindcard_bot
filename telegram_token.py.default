@@ -1,1 +1,5 @@
+# telegram bot token
 TOKEN = ''
+# donate links
+YOOMONEY = 'https://yoomoney.ru/to/4100117821629931'
+PAYPAL = 'https://paypal.me/vardenfell'
