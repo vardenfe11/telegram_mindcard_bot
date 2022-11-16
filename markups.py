@@ -29,8 +29,8 @@ delete = KeyboardButton("Delete")
 yes = KeyboardButton("Yes")
 no = KeyboardButton("No")
 
-markup_start = ReplyKeyboardMarkup(build_menu([repeat, new_word, translate], n_cols=3), resize_keyboard=True)
-markup_send_card = ReplyKeyboardMarkup([[remember, forgot], [new_word, translate, delete]], resize_keyboard=True)
+markup_start = ReplyKeyboardMarkup(build_menu([repeat, new_word], n_cols=2), resize_keyboard=True)
+markup_send_card = ReplyKeyboardMarkup([[remember, forgot], [new_word, delete]], resize_keyboard=True)
 markup_translate = markup_start
 markup_delete = ReplyKeyboardMarkup(build_menu([yes, no, new_word, repeat], n_cols=2), resize_keyboard=True)
 markup_create = markup_start
@@ -38,12 +38,13 @@ markup_create = markup_start
 
 def translate_markup():
     # keyboard for translated words
-    save_button = [
-        (InlineKeyboardButton(f'💾', callback_data=f'save_translated save')),
-        (InlineKeyboardButton(f'↻', callback_data=f'save_translated reverse')),
-        (InlineKeyboardButton(f'🏴‍☠', callback_data=f'save_translated flag')),
-    ]
-    message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=3))
+    message_markup = InlineKeyboardMarkup([
+        [(InlineKeyboardButton(f'✖', callback_data=f'message_delete None None')),
+         (InlineKeyboardButton(f'↻', callback_data=f'save_translated reverse')),
+         (InlineKeyboardButton(f'🏴‍☠', callback_data=f'save_translated flag'))],
+        [(InlineKeyboardButton(f'💾', callback_data=f'save_translated save'))]
+    ])
+    # message_markup = InlineKeyboardMarkup(build_menu(save_button, n_cols=3))
     return message_markup
 
 
@@ -234,7 +235,8 @@ def change_name_markup(user):
 
 def card_markup(card, back=None):
     func_name = 'repeat_cards'
-    if (card.today_repeat - card.repeat_mistake) < 3:
+    if (card.today_reverse_repeat == 0 and card.today_repeat - card.repeat_mistake < 3) or \
+            card.today_repeat < divmod(6 + card.repeat_mistake, 2)[0]:
         word_one, word_two = card.word_one, card.word_two
     else:
         word_two, word_one = card.word_one, card.word_two

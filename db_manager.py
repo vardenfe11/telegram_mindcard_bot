@@ -49,6 +49,7 @@ class User_db(Model):
     nickname = CharField()
     nickname_change = IntegerField()
     state = CharField()
+    add_cards_to_stack = BooleanField()
 
     class Meta:
         database = users_db
@@ -56,7 +57,7 @@ class User_db(Model):
 
 # Users DB manager
 class UserUpdater:
-    def __int__(self):
+    def __init__(self):
         self.user = None
         if not os.path.exists('users.db'):
             User_db.create_table(User_db)
@@ -74,6 +75,7 @@ class UserUpdater:
             db_user.score = user.score
             db_user.nickname = user.nickname
             db_user.nickname_change = user.nickname_change
+            db_user.add_cards_to_stack = user.add_cards_to_stack
             db_user.save()
         else:
             self.create_user(user)
@@ -90,6 +92,7 @@ class UserUpdater:
             user.score = db_user.score
             user.nickname = db_user.nickname
             user.nickname_change = db_user.nickname_change
+            user.add_cards_to_stack = db_user.add_cards_to_stack
         else:
             self.create_user(user)
 
@@ -106,6 +109,7 @@ class UserUpdater:
                 score=user.score,
                 nickname=user.nickname,
                 nickname_change=user.nickname_change,
+                add_cards_to_stack=user.add_cards_to_stack,
             )
         except Exception as error:
             log.exception(f'Ошибка при записи в БД: {error}')
@@ -115,7 +119,6 @@ class UserUpdater:
         # stats = []
         if User_db.select().where(User_db.score > 0):
             score_user_list = sorted(User_db.select().where(User_db.score > 0), key=lambda u: u.score, reverse=True)
-
             if len(score_user_list) > 0:
                 if users:
                     if score_user_list[0].user_id in users:
@@ -138,8 +141,6 @@ class UserUpdater:
 
         # else:
         #     stats += MESSAGE[user.interface_lang]['name_change']['no one']
-
-
 
 
 # Cards DB manager
@@ -218,6 +219,16 @@ class DataBaseUpdater:
             cards_return[card.user_id].append(card)
         return cards_return
 
+    def word_check(self, user, word):
+        card_response = []
+        db_user_cards = Card.select().where(Card.user_id == user.user_id)
+        for card in db_user_cards:
+            if card.word_one.lower().find(word.lower()) > -1:
+                card_response.append((card.word_one, card.word_two))
+            if card.word_two.lower().find(word.lower()) > -1:
+                card_response.append((card.word_one, card.word_two))
+        if card_response:
+            return card_response
     def card_delete(self, user, card_id):
         # Delete card by ID from DB for /delete_ID bot command
         if Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)):

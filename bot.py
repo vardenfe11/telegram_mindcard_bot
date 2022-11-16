@@ -155,8 +155,8 @@ class Bot:
         try:
             log.debug('обнаружен ивент: %s', update.message.text)
             self.on_event(update, context)
-        except Exception as error:
-            log.exception(f'Ошибка при получении ивента: {error}')
+        except ConnectionError:
+            log.exception(f'Ошибка при получении ивента')
 
     def new_user(self, user_id):
         """
@@ -279,12 +279,26 @@ class Bot:
         else:
             self.start(update, context)
 
+    def save_card(self, update, context, user, message=None):
+        if not message:
+            message = update.message.text.split(sep='\n')
+        card = MindCard(word_one=message[0],
+                        word_two=message[1],
+                        user_id=user.user_id)
+        user.mindcards_queuing.append(card)
+        self.db.update_base([card])
+
     def new_card(self, update, context, user, message=None, reverse=False):
-        send_saved_card = False
         if not message:
             message = update.message.text
-            send_saved_card = True
         word_list = message.split(sep='\n')
+        word_check = self.db.word_check(user, word_list[0])
+        if word_check:
+            print(word_check)
+            message = 'Database:'
+            for word in word_check:
+                message += f'\n{word[0]} - {word[1]}'
+            context.bot.send_message(update.effective_chat.id, message)
         if len(word_list) > 1:
             if reverse:
                 word_two = word_list[0]
@@ -292,15 +306,8 @@ class Bot:
             else:
                 word_one = word_list[0]
                 word_two = word_list[1]
-            card = MindCard(word_one=word_one,
-                            word_two=word_two,
-                            user_id=user.user_id)
-            user.mindcards_queuing.append(card)
-            self.db.update_base([card])
-            if send_saved_card:
-                send_message = f'⇨{word_one}\n⇦{word_two}\n✓ 💾'
-                context.bot.send_message(update.effective_chat.id, send_message,
-                                         reply_markup=self.markup[update.message.from_user.id])
+            send_message = f'{word_one}\n{word_two}'
+            context.bot.send_message(update.effective_chat.id, send_message, reply_markup=markups['translate_markup']())
         elif len(word_list) == 1:
             user.state = 'translate'
             self.handle_text(update, context, user)
@@ -326,15 +333,17 @@ class Bot:
                 card = self.user_card[user.user_id]
                 if card:
                     if card.repeat_lvl >= 0:
-                        if (user.repeat_time + datetime.timedelta(seconds=2)) > answer_time and \
+                        if (user.repeat_time + datetime.timedelta(seconds=3)) > answer_time and \
                                 card.repeat_mistake == 0:
                             time_bonus = 2
-                        elif (user.repeat_time + datetime.timedelta(seconds=4)) > answer_time and \
+                        elif (user.repeat_time + datetime.timedelta(seconds=6)) > answer_time and \
                                 card.repeat_mistake == 0:
                             time_bonus = 1
-                    if card.today_repeat < (6 + card.repeat_mistake / 2):
+                    if card.today_repeat < (6 + card.repeat_mistake) / 2:
                         card.today_repeat += 1 + time_bonus
-                    elif card.today_reverse_repeat < (6 + card.repeat_mistake / 2):
+                        if card.today_repeat > 3 and time_bonus > 0:
+                            card.today_repeat = 3
+                    elif card.today_reverse_repeat < (6 + card.repeat_mistake) / 2:
                         card.today_reverse_repeat += 1 + time_bonus
                     if button_answer == 'forgot':
                         card.repeat_mistake += 1
@@ -356,13 +365,15 @@ class Bot:
                 if not os.path.exists('audio'):
                     os.makedirs('audio')
                 card = self.user_card[user.user_id]
-                if button_answer == 'listenfront':
-                    if (card.today_repeat - card.repeat_mistake) < 3:
+
+                if (card.today_reverse_repeat == 0 and card.today_repeat - card.repeat_mistake < 3) or \
+                        card.today_repeat < divmod(6 + card.repeat_mistake, 2)[0]:
+                    if button_answer == 'listenfront':
                         word = card.word_one
                     else:
                         word = card.word_two
                 else:
-                    if (card.today_repeat - card.repeat_mistake) < 3:
+                    if button_answer == 'listenfront':
                         word = card.word_two
                     else:
                         word = card.word_one
@@ -507,8 +518,8 @@ class Bot:
             message_split = message.split(sep='\n')
             message_edit = message_split[1] + '\n' + message_split[0]
         elif button[1] == 'save':
-            self.new_card(update, context, user, message=message)
             message_split = message.split(sep='\n')
+            self.save_card(update, context, user, message=message_split)
             message_edit = f'⇨{message_split[0]}\n⇦{message_split[1]}\n✓ 💾'
         elif button[1] == 'flag':
             markup = markups['translate_markup']()
@@ -622,16 +633,21 @@ class Bot:
             if message_edit:
                 button_compare_result = button_compare(message_edit,
                                                        update.callback_query.message.reply_markup.inline_keyboard)
-                if (message_edit[0] != update.callback_query.message.text) or button_compare_result:
-                    if message_edit[2] and message_edit[1]:
-                        query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1],
-                                                entities=[message_edit[2]])
-                    elif message_edit[1]:
-                        query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1])
-                    elif message_edit[2]:
-                        query.edit_message_text(text=message_edit[0], entities=[message_edit[2]])
-                    else:
-                        query.edit_message_text(text=message_edit[0])
+                try:
+                    if (message_edit[0] != update.callback_query.message.text) or button_compare_result:
+                        if message_edit[2] and message_edit[1]:
+                            query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1],
+                                                    entities=[message_edit[2]])
+                        elif message_edit[1]:
+                            query.edit_message_text(text=message_edit[0], reply_markup=message_edit[1])
+                        elif message_edit[2]:
+                            query.edit_message_text(text=message_edit[0], entities=[message_edit[2]])
+                        else:
+                            query.edit_message_text(text=message_edit[0])
+                except SyntaxError:
+                    log.exception(f'Ошибка редактирования сообщения\nbutton_compare_result: {button_compare_result}\n'
+                                  f'message_edit: {message_edit}\n'
+                                  f'update.callback_query.message.text: {update.callback_query.message.text}')
 
     def settings(self, update: Update, context: CallbackContext, button=None):
         user = self.user_check(update)
@@ -676,6 +692,9 @@ class Bot:
                 return message
             else:
                 context.bot.send_message(update.effective_chat.id, message[0], reply_markup=message[1])
+        else:
+            message = MESSAGE[user.interface_lang]['name_change']['stats_nothing']
+            context.bot.send_message(update.effective_chat.id, message)
 
     def change_name(self, update, context, button=None):
         user = self.user_check(update)
