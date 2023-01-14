@@ -1,3 +1,5 @@
+from math import floor
+
 from telegram import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup
 from telegram_token import *
 from settings import *
@@ -20,7 +22,7 @@ def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
     return menu
 
 
-repeat = KeyboardButton('Repeat')
+repeat = KeyboardButton('Repeat✨')
 new_word = KeyboardButton('Create')
 translate = KeyboardButton('Translate')
 remember = KeyboardButton("Remember")
@@ -29,7 +31,7 @@ delete = KeyboardButton("Delete")
 yes = KeyboardButton("Yes")
 no = KeyboardButton("No")
 
-markup_start = ReplyKeyboardMarkup(build_menu([repeat, new_word], n_cols=2), resize_keyboard=True)
+markup_start = ReplyKeyboardMarkup(build_menu([repeat], n_cols=2), resize_keyboard=True)
 markup_send_card = ReplyKeyboardMarkup([[remember, forgot], [new_word, delete]], resize_keyboard=True)
 markup_translate = markup_start
 markup_delete = ReplyKeyboardMarkup(build_menu([yes, no, new_word, repeat], n_cols=2), resize_keyboard=True)
@@ -92,7 +94,7 @@ def list_step(proc_list, current_step, step_change):
     :param proc_list: list of changed parameters
     :param current_step: currents value (from user settings)
     :param step_change: change value (+1, -1) for button
-    :return: list value number for changed parametr
+    :return: list value number for changed parameter
     """
     step_change = int(step_change)
     if current_step + step_change >= len(proc_list):
@@ -233,6 +235,9 @@ def change_name_markup(user):
     return message_markup
 
 
+moon = ['🌚', '🌒', '🌓', '🌔', '🌝']
+
+
 def card_markup(card, back=None):
     func_name = 'repeat_cards'
     if (card.today_reverse_repeat == 0 and card.today_repeat - card.repeat_mistake < 3) or \
@@ -246,6 +251,8 @@ def card_markup(card, back=None):
     else:
         word = word_one
         reverse = 'front'
+    if card.repeat_lvl < 4:
+        word = moon[int(floor(card.repeat_lvl))+1] + ' ' + word
     buttons = [
         [
             InlineKeyboardButton(f'\n{word}\n',
@@ -258,7 +265,7 @@ def card_markup(card, back=None):
         ],
         [
             InlineKeyboardButton(f'🎵', callback_data=f'{func_name} {card.card_id} listen{reverse}'),
-            InlineKeyboardButton(f'🚮', callback_data=f'{func_name} {card.card_id} delete')
+            InlineKeyboardButton(f'🗑', callback_data=f'{func_name} {card.card_id} delete')
         ]
     ]
     message_markup = InlineKeyboardMarkup(buttons)

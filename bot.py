@@ -25,13 +25,14 @@ except ImportError:
 
 translator = Translator()
 
+logging.getLogger("telegram.vendor.ptb_urllib3.urllib3").setLevel(logging.CRITICAL)
+logging.getLogger("telegram.ext.dispatcher").setLevel(logging.CRITICAL)
 log = logging.getLogger()
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
 log.addHandler(stream_handler)
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 stream_handler.setLevel(logging.INFO)
-
 
 def def_value():
     return User(0, None)
@@ -274,10 +275,8 @@ class Bot:
             message_text = f'{update.message.text}\n{translated_message.text}'
             context.bot.send_message(update.effective_chat.id, message_text,
                                      reply_markup=markups['translate_markup']())
-        elif user.state == 'create':
-            self.new_card(update, context, user)
         else:
-            self.start(update, context)
+            self.new_card(update, context, user)
 
     def save_card(self, update, context, user, message=None):
         if not message:
@@ -294,7 +293,6 @@ class Bot:
         word_list = message.split(sep='\n')
         word_check = self.db.word_check(user, word_list[0])
         if word_check:
-            print(word_check)
             message = 'Database:'
             for word in word_check:
                 message += f'\n{word[0]} - {word[1]}'
@@ -429,7 +427,7 @@ class Bot:
 
     def buttons_handler(self, update, context, user):
         user_id = update.message.from_user.id
-        if update.message.text == 'Repeat':
+        if update.message.text == 'Repeat✨':
             self.repeat_cards(update, context)
         elif update.message.text == 'Create':
             user.state = 'create'
@@ -553,7 +551,7 @@ class Bot:
         self.user_check(update)
         context.bot.delete_message(update.effective_chat.id, update.callback_query.message.message_id)
 
-    def load_today_cards(self, update: Update):
+    def load_today_cards(self, update: Update, context=None):
         '''
         Load cards with today card repeat time from DB
         :param update: from TG

@@ -24,6 +24,10 @@ def button_compare(message_edit, keyboard2):
                         if button.text != keyboard1[line_num][num].text or \
                                 button.callback_data != keyboard1[line_num][num].callback_data:
                             button_coincidence = True
+                else:
+                    button_coincidence = True
+        else:
+            button_coincidence = True
     else:
         button_coincidence = True
     return button_coincidence
