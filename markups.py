@@ -155,34 +155,35 @@ def settings_markup(user, button):
     message_markup = InlineKeyboardMarkup(build_menu([
         InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][0],
                              callback_data=f'{func_name} None None'),
-        InlineKeyboardButton('◁', callback_data=f'{func_name} stack_size -5'),
-        InlineKeyboardButton(user.stack_size, callback_data=f'{func_name} None None'),
-        InlineKeyboardButton('▷', callback_data=f'{func_name} stack_size +5'),
+        InlineKeyboardButton('-5', callback_data=f'{func_name} stack_size -5'),
+        InlineKeyboardButton(f'≺{user.stack_size}≻', callback_data=f'{func_name} None None'),
+        InlineKeyboardButton('+5', callback_data=f'{func_name} stack_size +5'),
 
         InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][1], callback_data=f'{func_name} None None'),
-        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][interface_lang_steps[0]]] + '◁',
+        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][interface_lang_steps[0]]],
                              callback_data=f'{func_name} interface_lang {interface_lang_steps[0]}'),
-        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][user.interface_lang]] +
-                             INTERFACE['interface_langs'][user.interface_lang],
+        InlineKeyboardButton('≺' + FLAGS[INTERFACE['interface_langs'][user.interface_lang]] +
+                             INTERFACE['interface_langs'][user.interface_lang] + '≻',
                              callback_data=f'{func_name} None None'),
-        InlineKeyboardButton('▷' + FLAGS[INTERFACE['interface_langs'][interface_lang_steps[1]]],
+        InlineKeyboardButton(FLAGS[INTERFACE['interface_langs'][interface_lang_steps[1]]],
                              callback_data=f'{func_name} interface_lang {interface_lang_steps[1]}'),
 
         InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][2], callback_data=f'{func_name} None None'),
-        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][first_lang_steps[0]]] + '◁',
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][first_lang_steps[0]]],
                              callback_data=f'{func_name} first_lang {first_lang_steps[0]}'),
-        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][user.first_lang]] +
-                             INTERFACE['translate_langs'][user.first_lang], callback_data=f'{func_name} None None'),
-        InlineKeyboardButton('▷' + FLAGS[INTERFACE['translate_langs'][first_lang_steps[1]]],
+        InlineKeyboardButton('≺' + FLAGS[INTERFACE['translate_langs'][user.first_lang]] +
+                             INTERFACE['translate_langs'][user.first_lang] + '≻',
+                             callback_data=f'{func_name} None None'),
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][first_lang_steps[1]]],
                              callback_data=f'{func_name} first_lang {first_lang_steps[1]}'),
 
         InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][3], callback_data=f'{func_name} None None'),
-        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][second_lang_steps[0]]] + '◁',
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][second_lang_steps[0]]],
                              callback_data=f'{func_name} second_lang {second_lang_steps[0]}'),
-        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][user.second_lang]] +
-                             INTERFACE['translate_langs'][user.second_lang],
+        InlineKeyboardButton('≺' + FLAGS[INTERFACE['translate_langs'][user.second_lang]] +
+                             INTERFACE['translate_langs'][user.second_lang] + '≻',
                              callback_data=f'{func_name} None None'),
-        InlineKeyboardButton('▷' + FLAGS[INTERFACE['translate_langs'][second_lang_steps[1]]],
+        InlineKeyboardButton(FLAGS[INTERFACE['translate_langs'][second_lang_steps[1]]],
                              callback_data=f'{func_name} second_lang {second_lang_steps[1]}'),
 
         InlineKeyboardButton(INTERFACE[user.interface_lang]['settings'][5][0], callback_data=f'{func_name} None None'),
@@ -252,7 +253,7 @@ def card_markup(card, back=None):
         word = word_one
         reverse = 'front'
     if card.repeat_lvl < 4:
-        word = moon[int(floor(card.repeat_lvl))+1] + ' ' + word
+        word = moon[int(floor(card.repeat_lvl)) + 1] + ' ' + word
     buttons = [
         [
             InlineKeyboardButton(f'\n{word}\n',

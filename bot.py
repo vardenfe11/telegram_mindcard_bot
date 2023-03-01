@@ -169,7 +169,7 @@ class Bot:
         users_db_cards = self.db.load_base(user)
         if users_db_cards:
             self.users[user_id].mindcards_queuing = users_db_cards
-        log.info('New user is created, user_id: %s', user_id)
+        log.info(f'New user is created, user_id: {user_id}')
 
     def on_event(self, update, context):
         user_id = update.message.from_user.id
@@ -277,6 +277,7 @@ class Bot:
                                      reply_markup=markups['translate_markup']())
         else:
             self.new_card(update, context, user)
+        # context.bot.delete_message(update.effective_chat.id, update.message.message_id)
 
     def save_card(self, update, context, user, message=None):
         if not message:
