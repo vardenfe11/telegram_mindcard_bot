@@ -147,7 +147,7 @@ class UserUpdater:
 class DataBaseUpdater:
     def __init__(self):
         self.loaded_data = []
-        if not os.path.exists('cards.db'):
+        if not os.path.exists('cards2.db'):
             Card.create_table(Card)
 
     def update_base(self, mindcards):
@@ -224,9 +224,9 @@ class DataBaseUpdater:
         db_user_cards = Card.select().where(Card.user_id == user.user_id)
         for card in db_user_cards:
             if card.word_one.lower().find(word.lower()) > -1:
-                card_response.append((card.word_one, card.word_two))
+                card_response.append(card)
             if card.word_two.lower().find(word.lower()) > -1:
-                card_response.append((card.word_one, card.word_two))
+                card_response.append(card)
         if card_response:
             return card_response
     def card_delete(self, user, card_id):

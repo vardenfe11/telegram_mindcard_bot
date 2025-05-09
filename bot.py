@@ -4,6 +4,8 @@ import os
 import random
 from functools import reduce
 from gtts import gTTS
+
+from ai import get_mem_hint
 from markups import markups
 from googletrans import Translator
 from db_manager import DataBaseUpdater, UserUpdater
@@ -26,6 +28,7 @@ except ImportError:
 translator = Translator()
 
 logging.getLogger("telegram.vendor.ptb_urllib3.urllib3").setLevel(logging.CRITICAL)
+logging.getLogger("telegram.vendor.ptb_urllib3.urllib3.connection.VerifiedHTTPSConnection").setLevel(logging.CRITICAL)
 logging.getLogger("telegram.ext.dispatcher").setLevel(logging.CRITICAL)
 log = logging.getLogger()
 stream_handler = logging.StreamHandler()
@@ -33,6 +36,7 @@ stream_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
 log.addHandler(stream_handler)
 log.setLevel(logging.INFO)
 stream_handler.setLevel(logging.INFO)
+
 
 def def_value():
     return User(0, None)
@@ -169,12 +173,12 @@ class Bot:
         users_db_cards = self.db.load_base(user)
         if users_db_cards:
             self.users[user_id].mindcards_queuing = users_db_cards
-        log.info(f'New user is created, user_id: {user_id}')
 
     def on_event(self, update, context):
         user_id = update.message.from_user.id
         if update:
             if user_id not in self.users:
+                log.info(f'New user is created, user_id: {user_id} {update.message.from_user.username}')
                 self.new_user(user_id)
             user = self.users[user_id]
             button_click = False
@@ -224,6 +228,7 @@ class Bot:
             user_id = update.message.from_user.id
             if user_id not in self.users:
                 self.new_user(update.message.from_user.id)
+                log.info(f'New user is created, user_id: {user_id} {update.message.from_user.username}')
         elif update.callback_query:
             user_id = update.callback_query.from_user.id
             if user_id not in self.users:
@@ -295,9 +300,10 @@ class Bot:
         word_check = self.db.word_check(user, word_list[0])
         if word_check:
             message = 'Database:'
-            for word in word_check:
-                message += f'\n{word[0]} - {word[1]}'
-            context.bot.send_message(update.effective_chat.id, message)
+            for card in word_check:
+                message += (f'\n{card.word_one} - {card.word_two} '
+                            f'↻[{(card.repeat_date + datetime.timedelta(days=card.repeat_lvl ** 2)).strftime("%d.%m.%Y")}]')
+            context.bot.send_message(update.effective_chat.id, message, reply_markup=markups['message_delete'](''))
         if len(word_list) > 1:
             if reverse:
                 word_two = word_list[0]
@@ -394,12 +400,23 @@ class Bot:
                 cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
                 send_message = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
                 return [send_message, inline_markup, None]
+            elif button_answer == 'ai':
+                user.state = 'repeat'
+                user.save()
+                card = self.user_card[user.user_id]
+                word = card.word_one
+                translation = card.word_two
+                ai_hint = get_mem_hint(word, translation)
+                if ai_hint:
+                    context.bot.send_message(update.effective_chat.id, ai_hint, reply_markup=markups['message_delete'](''))
+                else:
+                    context.bot.send_message(update.effective_chat.id, 'no hint :(', reply_markup=markups['message_delete'](''))
 
         else:
             # no button
             user = self.users[update.message.from_user.id]
-            user.mindcards_queuing = sorted(user.mindcards + user.mindcards_queuing + user.mindcards_delayed,
-                                            key=lambda m: m.repeat_lvl)
+            user.mindcards_queuing = user.mindcards + user.mindcards_queuing + user.mindcards_delayed
+            random.shuffle(user.mindcards_queuing)
             user.mindcards = []
             user.mindcards_delayed = []
             self.user_card[user.user_id] = user.get_card(self.db)
@@ -520,6 +537,7 @@ class Bot:
             message_split = message.split(sep='\n')
             self.save_card(update, context, user, message=message_split)
             message_edit = f'⇨{message_split[0]}\n⇦{message_split[1]}\n✓ 💾'
+            markup = markups['message_delete']('')
         elif button[1] == 'flag':
             markup = markups['translate_markup']()
             message_split = message.split(sep='\n')
@@ -590,6 +608,7 @@ class Bot:
                             self.users[db_card.user_id].mindcards_queuing.append(db_card)
                     else:
                         self.new_user(db_card.user_id)
+                        log.info(f'New user is created, user_id: {user_id} {update.message.from_user.username}')
                         self.users[db_card.user_id].mindcards_queuing.append(db_card)
 
     def load_user_cards(self, update: Update, context: CallbackContext, button=None):

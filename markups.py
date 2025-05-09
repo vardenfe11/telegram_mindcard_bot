@@ -236,7 +236,7 @@ def change_name_markup(user):
     return message_markup
 
 
-moon = ['🌚', '🌒', '🌓', '🌔', '🌝']
+moon = ['⓿', '➊', '➋', '➌', '➍']
 
 
 def card_markup(card, back=None):
@@ -256,7 +256,7 @@ def card_markup(card, back=None):
         word = moon[int(floor(card.repeat_lvl)) + 1] + ' ' + word
     buttons = [
         [
-            InlineKeyboardButton(f'\n{word}\n',
+            InlineKeyboardButton(f'{word}',
                                  callback_data=f'{func_name} {card.card_id} {reverse}'),
         ],
         [
@@ -266,8 +266,9 @@ def card_markup(card, back=None):
         ],
         [
             InlineKeyboardButton(f'🎵', callback_data=f'{func_name} {card.card_id} listen{reverse}'),
-            InlineKeyboardButton(f'🗑', callback_data=f'{func_name} {card.card_id} delete')
-        ]
+            InlineKeyboardButton(f'💡', callback_data=f'{func_name} {card.card_id} ai'),
+            InlineKeyboardButton(f'🗑', callback_data=f'{func_name} {card.card_id} delete'),
+        ],
     ]
     message_markup = InlineKeyboardMarkup(buttons)
     return message_markup
