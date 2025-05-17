@@ -11,9 +11,17 @@ cards_db = SqliteDatabase('cards.db')
 users_db = SqliteDatabase('users.db')
 
 
-# Cards class for telegram bot
+# ──────────────────────────── КАРТОЧКА ────────────────────────────────────────
 class MindCard:
-    def __init__(self, word_one, word_two, user_id, repeat_lvl=-1, card_id=None):
+    def __init__(
+            self,
+            word_one: str,
+            word_two: str,
+            user_id: int,
+            repeat_lvl: int = -1,
+            card_id: int | None = None,
+            hint: str | None = None,
+    ):
         self.word_one = word_one
         self.word_two = word_two
         self.repeat_lvl = repeat_lvl
@@ -23,8 +31,13 @@ class MindCard:
         self.user_id = user_id
         self.card_id = card_id
 
+        # — подсказки —
+        self.hint: str | None = hint  # сохранённая в БД
+        self.hint_visible: bool = False  # показана ли сохранённая
+        self.new_hint: str | None = None  # «черновик» новой подсказки
 
-# Cards class for DB
+
+# ──────────────────────────── МОДЕЛИ БД ───────────────────────────────────────
 class Card(Model):
     user_id = IntegerField()
     card_id = AutoField()
@@ -33,6 +46,7 @@ class Card(Model):
     create_date = DateField()
     repeat_date = DateField()
     repeat_lvl = IntegerField()
+    hint = TextField(null=True)  # ← новая колонка
 
     class Meta:
         database = cards_db
@@ -55,46 +69,55 @@ class User_db(Model):
         database = users_db
 
 
-# Users DB manager
+# ──────────────────────── РАБОТА С ПОЛЬЗОВАТЕЛЯМИ ─────────────────────────────
 class UserUpdater:
     def __init__(self):
         self.user = None
         if not os.path.exists('users.db'):
             User_db.create_table(User_db)
 
+    # сохранение / загрузка сведений о пользователе (без изменений)
     def save(self, user):
-        # Save user from bot to DB
         if User_db.select().where(User_db.user_id == user.user_id):
-            db_user = User_db.select().where(User_db.user_id == user.user_id).get()
-            db_user.user_id = user.user_id
+            db_user = User_db.get(User_db.user_id == user.user_id)
             db_user.stack_size = user.stack_size
             db_user.interface_lang = user.interface_lang
             db_user.first_lang = user.first_lang
             db_user.second_lang = user.second_lang
-            db_user.state = user.state
             db_user.score = user.score
             db_user.nickname = user.nickname
             db_user.nickname_change = user.nickname_change
+            db_user.state = user.state
             db_user.add_cards_to_stack = user.add_cards_to_stack
             db_user.save()
         else:
-            self.create_user(user)
+            User_db.create(
+                user_id=user.user_id,
+                stack_size=user.stack_size,
+                interface_lang=user.interface_lang,
+                first_lang=user.first_lang,
+                second_lang=user.second_lang,
+                score=user.score,
+                nickname=user.nickname,
+                nickname_change=user.nickname_change,
+                state=user.state,
+                add_cards_to_stack=user.add_cards_to_stack,
+            )
 
     def load(self, user):
-        # Update user data from DB
         if User_db.select().where(User_db.user_id == user.user_id):
-            db_user = User_db.select().where(User_db.user_id == user.user_id).get()
+            db_user = User_db.get(User_db.user_id == user.user_id)
             user.stack_size = db_user.stack_size
             user.interface_lang = db_user.interface_lang
             user.first_lang = db_user.first_lang
             user.second_lang = db_user.second_lang
-            user.state = db_user.state
             user.score = db_user.score
             user.nickname = db_user.nickname
             user.nickname_change = db_user.nickname_change
+            user.state = db_user.state
             user.add_cards_to_stack = db_user.add_cards_to_stack
         else:
-            self.create_user(user)
+            self.save(user)
 
     def create_user(self, user):
         # Create user in DB from bot user class
@@ -115,127 +138,135 @@ class UserUpdater:
             log.exception(f'Ошибка при записи в БД: {error}')
 
     def load_stats(self, users=None):
-        # Load weekly statistic from DB
-        # stats = []
         if User_db.select().where(User_db.score > 0):
-            score_user_list = sorted(User_db.select().where(User_db.score > 0), key=lambda u: u.score, reverse=True)
-            if len(score_user_list) > 0:
+            user_list = sorted(
+                User_db.select().where(User_db.score > 0),
+                key=lambda u: u.score,
+                reverse=True
+            )
+            if user_list:
                 if users:
-                    if score_user_list[0].user_id in users:
-                        users[score_user_list[0].user_id].nickname_change += 1
-                        users[score_user_list[0].user_id].save()
+                    top_id = user_list[0].user_id
+                    if top_id in users:
+                        users[top_id].nickname_change += 1
+                        users[top_id].save()
                     else:
-                        score_user_list[0].nickname_change += 1
-                        score_user_list[0].save()
-                    for num, db_user in enumerate(score_user_list):
-                        if db_user.user_id in users:
-                            users[db_user.user_id].score = int(db_user.score / 10)
-                            users[db_user.user_id].save()
-                        else:
-                            db_user.score = int(db_user.score / 10)
-                            db_user.save()
-                else:
-                    return score_user_list
-            else:
-                return None
-
-        # else:
-        #     stats += MESSAGE[user.interface_lang]['name_change']['no one']
+                        user_list[0].nickname_change += 1
+                        user_list[0].save()
+                for db_user in user_list:
+                    if users and db_user.user_id in users:
+                        users[db_user.user_id].score = int(db_user.score / 10)
+                        users[db_user.user_id].save()
+                    else:
+                        db_user.score = int(db_user.score / 10)
+                        db_user.save()
 
 
-# Cards DB manager
+# ──────────────────────── РАБОТА С КАРТОЧКАМИ ────────────────────────────────
 class DataBaseUpdater:
     def __init__(self):
-        self.loaded_data = []
-        if not os.path.exists('cards2.db'):
-            Card.create_table(Card)
+        self.loaded_data: list[MindCard] = []
 
-    def update_base(self, mindcards):
-        # Update DB data for mindcards list
+        # создать таблицу или «лёгкая миграция» (добавляем колонку hint)
+        if not Card.table_exists():
+            Card.create_table()
+        else:
+            if 'hint' not in Card._meta.fields:
+                cards_db.execute_sql('ALTER TABLE card ADD COLUMN hint TEXT;')
+
+    # ---------- сохранение / обновление --------------------------------------
+    def update_base(self, mindcards: list[MindCard]):
         today_date = datetime.date.today()
         for card in mindcards:
             card.repeat_date = today_date + datetime.timedelta(days=int(2 ** card.repeat_lvl))
+
+            # новая карточка
             if not card.card_id:
                 try:
-                    saved_card = Card(user_id=card.user_id,
-                                      create_date=today_date,
-                                      word_one=card.word_one,
-                                      word_two=card.word_two,
-                                      repeat_date=card.repeat_date,
-                                      repeat_lvl=card.repeat_lvl)  # .on_conflict('replace').execute()
-                    saved_card.save()
-                    card.card_id = saved_card.card_id
-                except Exception as error:
-                    log.exception(f'Ошибка при записи в БД: {error}')
-            else:
-                if Card.select().where(Card.card_id == card.card_id):
-                    updated_card = Card.select().where(Card.card_id == card.card_id).get()
-                    updated_card.user_id = card.user_id
-                    updated_card.repeat_lvl = card.repeat_lvl
-                    updated_card.repeat_date = card.repeat_date
-                    updated_card.save()
-                else:
-                    log.exception(f'Ошибка при зaгрузке карточки #{card.card_id} из БД')
+                    saved = Card.create(
+                        user_id=card.user_id,
+                        create_date=today_date,
+                        word_one=card.word_one,
+                        word_two=card.word_two,
+                        repeat_date=card.repeat_date,
+                        repeat_lvl=card.repeat_lvl,
+                        hint=card.hint,
+                    )
+                    card.card_id = saved.card_id
+                except Exception as err:
+                    log.exception(f'Ошибка при записи в БД: {err}')
 
-    def load_base(self, user, days=None):
-        # Load cards for N repeat days from DB for /load_N bot command
-        self.loaded_data = []
-        user_id = user.user_id
-        today_date = datetime.date.today()
-        if days:
-            if days == 'all':
-                db_user_cards = Card.select().where(Card.user_id == user_id)
+            # обновление существующей
             else:
-                days_delta = datetime.timedelta(days=int(days))
-                load_before_date = today_date + days_delta
-                db_user_cards = Card.select().where((Card.repeat_date <= load_before_date) & (Card.user_id == user_id))
-        else:
-            db_user_cards = Card.select().where((Card.repeat_date <= today_date) & (Card.user_id == user_id))
-        if db_user_cards:
-            for db_card in db_user_cards:
-                card = MindCard(word_one=db_card.word_one,
-                                word_two=db_card.word_two,
-                                user_id=user.user_id,
-                                repeat_lvl=db_card.repeat_lvl,
-                                card_id=db_card.card_id)
-                self.loaded_data.append(card)
+                try:
+                    upd = Card.get(Card.card_id == card.card_id)
+                    upd.repeat_lvl = card.repeat_lvl
+                    upd.repeat_date = card.repeat_date
+                    upd.hint = card.hint
+                    upd.save()
+                except Exception as err:
+                    log.exception(f'Ошибка при обновлении #{card.card_id}: {err}')
+
+    # ---------- выборка -------------------------------------------------------
+    def load_base(self, user, days=None):
+        """Загрузить карточки пользователя (по умолчанию – только «на сегодня»)."""
+        self.loaded_data.clear()
+        today = datetime.date.today()
+
+        selector = Card.select().where(Card.user_id == user.user_id)
+        if days and days != 'all':
+            selector = selector.where(Card.repeat_date <= today + datetime.timedelta(days=int(days)))
+        elif not days:
+            selector = selector.where(Card.repeat_date <= today)
+
+        for db_card in selector:
+            self.loaded_data.append(
+                MindCard(
+                    word_one=db_card.word_one,
+                    word_two=db_card.word_two,
+                    user_id=user.user_id,
+                    repeat_lvl=db_card.repeat_lvl,
+                    card_id=db_card.card_id,
+                    hint=db_card.hint,
+                )
+            )
         return self.loaded_data
 
     def load_today_cards(self):
-        # Load list of cards where Card.repeat_date <= today_date from DB
-        # Turn to MindCard list and return it
+        """Собрать словарь {user_id: [MindCard, …]} для автоповторения."""
+
         def def_value():
             return []
 
-        today_date = datetime.date.today()
-        db_user_cards = Card.select().where(Card.repeat_date <= today_date)
-        cards_return = defaultdict(def_value)
-        for db_card in db_user_cards:
-            card = MindCard(word_one=db_card.word_one,
-                            word_two=db_card.word_two,
-                            user_id=db_card.user_id,
-                            repeat_lvl=db_card.repeat_lvl,
-                            card_id=db_card.card_id)
-            cards_return[card.user_id].append(card)
-        return cards_return
+        today_cards = defaultdict(def_value)
+        today = datetime.date.today()
 
+        for db_card in Card.select().where(Card.repeat_date <= today):
+            today_cards[db_card.user_id].append(
+                MindCard(
+                    word_one=db_card.word_one,
+                    word_two=db_card.word_two,
+                    user_id=db_card.user_id,
+                    repeat_lvl=db_card.repeat_lvl,
+                    card_id=db_card.card_id,
+                    hint=db_card.hint,
+                )
+            )
+        return today_cards
+
+    # ---------- поиск и удаление (без изменений) ------------------------------
     def word_check(self, user, word):
-        card_response = []
-        db_user_cards = Card.select().where(Card.user_id == user.user_id)
-        for card in db_user_cards:
-            if card.word_one.lower().find(word.lower()) > -1:
-                card_response.append(card)
-            if card.word_two.lower().find(word.lower()) > -1:
-                card_response.append(card)
-        if card_response:
-            return card_response
+        result = []
+        query = Card.select().where(Card.user_id == user.user_id)
+        for db_card in query:
+            if word.lower() in db_card.word_one.lower() or word.lower() in db_card.word_two.lower():
+                result.append(db_card)
+        return result
+
     def card_delete(self, user, card_id):
-        # Delete card by ID from DB for /delete_ID bot command
-        if Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)):
-            deleted_card = Card.select().where((Card.card_id == card_id) & (Card.user_id == user.user_id)).get()
-            deleted_card.delete_instance()
-
-
-if __name__ == '__main__':
-    base = UserUpdater()
-    User_db.create_table(User_db)
+        try:
+            Card.get(Card.card_id == card_id, Card.user_id == user.user_id).delete_instance()
+            return True
+        except Exception as err:
+            log.exception(f'Ошибка удаления карточки #{card_id}: {err}')
+            return False

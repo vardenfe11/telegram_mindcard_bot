@@ -1,5 +1,4 @@
 from math import floor
-
 from telegram import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup
 from telegram_token import *
 from settings import *
@@ -238,41 +237,49 @@ def change_name_markup(user):
 
 moon = ['⓿', '➊', '➋', '➌', '➍']
 
-
+# ─── КАРТОЧКА (inline-клавиатура) ─────────────────────────────────────────────
 def card_markup(card, back=None):
+    """
+    Строит inline-клавиатуру для карточки с учётом подсказок.
+    • Если подсказка показывается (card.hint_visible) – рисует кнопки «удалить / новая».
+    • Если открыт черновик новой подсказки (card.new_hint) – кнопки «сохранить / отмена».
+    """
     func_name = 'repeat_cards'
+
+    # определяем, какую сторону показывать
     if (card.today_reverse_repeat == 0 and card.today_repeat - card.repeat_mistake < 3) or \
             card.today_repeat < divmod(6 + card.repeat_mistake, 2)[0]:
         word_one, word_two = card.word_one, card.word_two
     else:
         word_two, word_one = card.word_one, card.word_two
-    if back:
-        word = word_two
-        reverse = 'back'
-    else:
-        word = word_one
-        reverse = 'front'
-    if card.repeat_lvl < 4:
-        word = moon[int(floor(card.repeat_lvl)) + 1] + ' ' + word
-    buttons = [
-        [
-            InlineKeyboardButton(f'{word}',
-                                 callback_data=f'{func_name} {card.card_id} {reverse}'),
-        ],
-        [
-            InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
-                                 callback_data=f'{func_name} {card.card_id} remember'),
-            InlineKeyboardButton(f'✖{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot')
-        ],
-        [
-            InlineKeyboardButton(f'🎵', callback_data=f'{func_name} {card.card_id} listen{reverse}'),
-            InlineKeyboardButton(f'💡', callback_data=f'{func_name} {card.card_id} ai'),
-            InlineKeyboardButton(f'🗑', callback_data=f'{func_name} {card.card_id} delete'),
-        ],
-    ]
-    message_markup = InlineKeyboardMarkup(buttons)
-    return message_markup
 
+    word, reverse = (word_two, 'back') if back else (word_one, 'front')
+    if card.repeat_lvl < 4:
+        word = ['⓿', '➊', '➋', '➌', '➍'][int(floor(card.repeat_lvl)) + 1] + ' ' + word
+
+    # базовые кнопки
+    buttons = [
+        [InlineKeyboardButton(word, callback_data=f'{func_name} {card.card_id} {reverse}')],
+        [InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
+                              callback_data=f'{func_name} {card.card_id} remember'),
+         InlineKeyboardButton(f'✖{card.repeat_mistake}',
+                              callback_data=f'{func_name} {card.card_id} forgot')],
+        [InlineKeyboardButton('🎵', callback_data=f'{func_name} {card.card_id} listen{reverse}'),
+         InlineKeyboardButton('💡', callback_data=f'{func_name} {card.card_id} ai'),
+         InlineKeyboardButton('🗑', callback_data=f'{func_name} {card.card_id} delete')],
+    ]
+
+    # дополнительная строка при работе с подсказками
+    if card.hint_visible or card.new_hint is not None:
+        if card.new_hint is None:  # показываем сохранённую подсказку
+            extra = [InlineKeyboardButton('🗑', callback_data=f'{func_name} {card.card_id} ai_del'),
+                     InlineKeyboardButton('♻', callback_data=f'{func_name} {card.card_id} ai_new')]
+        else:  # показываем НЕсохранённую новую подсказку
+            extra = [InlineKeyboardButton('💾', callback_data=f'{func_name} {card.card_id} ai_save'),
+                     InlineKeyboardButton('↩', callback_data=f'{func_name} {card.card_id} ai_cancel')]
+        buttons.insert(0, extra)
+
+    return InlineKeyboardMarkup(buttons)
 
 def message_delete(word):
     save_button = [
