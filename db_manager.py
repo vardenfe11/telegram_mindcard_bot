@@ -19,8 +19,8 @@ class MindCard:
             word_two: str,
             user_id: int,
             repeat_lvl: int = -1,
-            card_id: int | None = None,
-            hint: str | None = None,
+            card_id: int = None,
+            hint: str = None,
     ):
         self.word_one = word_one
         self.word_two = word_two
@@ -32,9 +32,9 @@ class MindCard:
         self.card_id = card_id
 
         # — подсказки —
-        self.hint: str | None = hint  # сохранённая в БД
+        self.hint = hint  # сохранённая в БД
         self.hint_visible: bool = False  # показана ли сохранённая
-        self.new_hint: str | None = None  # «черновик» новой подсказки
+        self.new_hint = None  # «черновик» новой подсказки
 
 
 # ──────────────────────────── МОДЕЛИ БД ───────────────────────────────────────
