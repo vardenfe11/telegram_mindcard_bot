@@ -5,7 +5,7 @@ import random
 from functools import reduce
 from gtts import gTTS
 
-from ai import get_mem_hint
+from ai import ensure_hint, get_mem_hint   # ensure_hint используется в обработчике
 from markups import markups
 from googletrans import Translator
 from db_manager import DataBaseUpdater, UserUpdater
@@ -136,6 +136,7 @@ class Bot:
             'message_delete': self.message_delete,
             'change_name': self.change_name,
             'stats': self.stats,
+            'hint': self.hint_handler,
         }
 
     def run(self):
@@ -154,6 +155,61 @@ class Bot:
         dispatcher.add_handler(CallbackQueryHandler(self.button))
         dispatcher.add_handler(MessageHandler(Filters.text, self.handle_messages))
         updater.start_polling()
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  НОВЫЙ ОБРАБОТЧИК ПОДСКАЗОК
+    # ─────────────────────────────────────────────────────────────────────
+    def hint_handler(self, update, context, button):
+        """
+        button = ['hint', card_id, action]
+        action: toggle | new | delete | replace | cancel
+        """
+        user = self.users[update.callback_query.from_user.id]
+        card_id = int(button[1])
+        action = button[2]
+        card = user.get_card_by_id(card_id)
+
+        # --- toggle ---------------------------------------------------------
+        if action == 'toggle':
+            if card.hint is None:                         # ещё нет сохранённой
+                card.hint = ensure_hint(card, self.db)
+                card.hint_shown = True
+            else:
+                card.hint_shown = not card.hint_shown
+            card.temp_hint = None                         # сброс временных
+        # --- new ------------------------------------------------------------
+        elif action == 'new':
+            card.temp_hint = get_mem_hint(card.word_one, card.word_two)
+            card.hint_shown = True
+        # --- delete ---------------------------------------------------------
+        elif action == 'delete':
+            card.hint = None
+            card.hint_shown = False
+            card.temp_hint = None
+            self.db.update_base([card])
+        # --- replace / save -------------------------------------------------
+        elif action == 'replace':
+            if card.temp_hint:            # temp_hint становится основной
+                card.hint = card.temp_hint
+                card.temp_hint = None
+            card.hint_shown = True
+            self.db.update_base([card])
+        # --- cancel ---------------------------------------------------------
+        elif action == 'cancel':
+            card.temp_hint = None
+            card.hint_shown = bool(card.hint)
+
+        # ───── обновляем сообщение ─────
+        cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+        base_text = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+
+        if card.hint_shown:
+            hint_text = card.temp_hint if card.temp_hint else card.hint
+            base_text += f'\n\n💡 *Hint*\n{hint_text}'
+
+        markup = markups['card_markup'](card)
+        return [base_text, markup, None]
+
 
     def handle_messages(self, update: Update, context: CallbackContext):
         self.user_check(update)
@@ -400,17 +456,17 @@ class Bot:
                 cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
                 send_message = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
                 return [send_message, inline_markup, None]
-            elif button_answer == 'ai':
-                user.state = 'repeat'
-                user.save()
-                card = self.user_card[user.user_id]
-                word = card.word_one
-                translation = card.word_two
-                ai_hint = get_mem_hint(word, translation)
-                if ai_hint:
-                    context.bot.send_message(update.effective_chat.id, ai_hint, reply_markup=markups['message_delete'](''))
-                else:
-                    context.bot.send_message(update.effective_chat.id, 'no hint :(', reply_markup=markups['message_delete'](''))
+            # elif button_answer == 'ai':
+            #     user.state = 'repeat'
+            #     user.save()
+            #     card = self.user_card[user.user_id]
+            #     word = card.word_one
+            #     translation = card.word_two
+            #     ai_hint = get_mem_hint(word, translation)
+            #     if ai_hint:
+            #         context.bot.send_message(update.effective_chat.id, ai_hint, reply_markup=markups['message_delete'](''))
+            #     else:
+            #         context.bot.send_message(update.effective_chat.id, 'no hint :(', reply_markup=markups['message_delete'](''))
 
         else:
             # no button

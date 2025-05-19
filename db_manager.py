@@ -2,18 +2,33 @@
 import os
 import datetime
 import logging
-from peewee import *
+from typing import Optional
 from collections import defaultdict
 
-log = logging.getLogger()
+from peewee import *
+
+log = logging.getLogger(__name__)
 
 cards_db = SqliteDatabase('cards.db')
 users_db = SqliteDatabase('users.db')
 
 
-# Cards class for telegram bot
+# ──────────────────────────────────────────────────────────────────────────────
+# Runtime-класс карточки, используемый ботом
+# ──────────────────────────────────────────────────────────────────────────────
 class MindCard:
-    def __init__(self, word_one, word_two, user_id, repeat_lvl=-1, card_id=None):
+    """
+    Карточка, хранящаяся в оперативной памяти во время работы бота
+    """
+    def __init__(
+        self,
+        word_one: str,
+        word_two: str,
+        user_id: int,
+        repeat_lvl: int = -1,
+        card_id: Optional[int] = None,
+        hint: Optional[str] = None,
+    ):
         self.word_one = word_one
         self.word_two = word_two
         self.repeat_lvl = repeat_lvl
@@ -23,8 +38,16 @@ class MindCard:
         self.user_id = user_id
         self.card_id = card_id
 
+        # ----  NEW  -----------------------------------------------------------
+        self.hint: Optional[str] = hint          # сохранённая мнемоника
+        self.hint_shown: bool = False           # отображается ли сейчас?
+        self.temp_hint: Optional[str] = None    # временно сгенерированная
+        # ---------------------------------------------------------------------
 
-# Cards class for DB
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  ORM-модель карточки
+# ──────────────────────────────────────────────────────────────────────────────
 class Card(Model):
     user_id = IntegerField()
     card_id = AutoField()
@@ -33,6 +56,9 @@ class Card(Model):
     create_date = DateField()
     repeat_date = DateField()
     repeat_lvl = IntegerField()
+    # ----  NEW  ---------------------------------------------------------------
+    hint = TextField(null=True)                 # хранит мнемонику/подсказку
+    # -------------------------------------------------------------------------
 
     class Meta:
         database = cards_db
@@ -139,85 +165,94 @@ class UserUpdater:
             else:
                 return None
 
-        # else:
-        #     stats += MESSAGE[user.interface_lang]['name_change']['no one']
 
-
-# Cards DB manager
+# ──────────────────────────────────────────────────────────────────────────────
+#  Менеджер карточек
+# ──────────────────────────────────────────────────────────────────────────────
 class DataBaseUpdater:
     def __init__(self):
         self.loaded_data = []
-        if not os.path.exists('cards2.db'):
+        if not os.path.exists('cards.db'):
             Card.create_table(Card)
 
+    # ░░░  SAVE / UPDATE  ░░░
     def update_base(self, mindcards):
-        # Update DB data for mindcards list
+        """
+        Получает список MindCard и синхронизирует их с БД.
+        """
         today_date = datetime.date.today()
         for card in mindcards:
-            card.repeat_date = today_date + datetime.timedelta(days=int(2 ** card.repeat_lvl))
+            card.repeat_date = today_date + datetime.timedelta(days=2 ** card.repeat_lvl)
+
+            # --- insert -------------------------------------------------------
             if not card.card_id:
-                try:
-                    saved_card = Card(user_id=card.user_id,
-                                      create_date=today_date,
-                                      word_one=card.word_one,
-                                      word_two=card.word_two,
-                                      repeat_date=card.repeat_date,
-                                      repeat_lvl=card.repeat_lvl)  # .on_conflict('replace').execute()
-                    saved_card.save()
-                    card.card_id = saved_card.card_id
-                except Exception as error:
-                    log.exception(f'Ошибка при записи в БД: {error}')
-            else:
-                if Card.select().where(Card.card_id == card.card_id):
-                    updated_card = Card.select().where(Card.card_id == card.card_id).get()
-                    updated_card.user_id = card.user_id
-                    updated_card.repeat_lvl = card.repeat_lvl
-                    updated_card.repeat_date = card.repeat_date
-                    updated_card.save()
-                else:
-                    log.exception(f'Ошибка при зaгрузке карточки #{card.card_id} из БД')
+                db_obj = Card.create(
+                    user_id=card.user_id,
+                    word_one=card.word_one,
+                    word_two=card.word_two,
+                    create_date=today_date,
+                    repeat_date=card.repeat_date,
+                    repeat_lvl=card.repeat_lvl,
+                    hint=card.hint,
+                )
+                card.card_id = db_obj.card_id
+                continue
+            # --- update -------------------------------------------------------
+            try:
+                db_obj = Card.get(Card.card_id == card.card_id)
+            except DoesNotExist:
+                log.warning('Card #%s not found, inserting new.', card.card_id)
+                self.update_base([MindCard(**card.__dict__)])
+                continue
+
+            db_obj.repeat_lvl = card.repeat_lvl
+            db_obj.repeat_date = card.repeat_date
+            db_obj.hint = card.hint
+            db_obj.save()
+
+    # ░░░  LOAD  ░░░
+    def _mk_mindcard(self, db_card, user_id):
+        return MindCard(
+            word_one=db_card.word_one,
+            word_two=db_card.word_two,
+            user_id=user_id,
+            repeat_lvl=db_card.repeat_lvl,
+            card_id=db_card.card_id,
+            hint=db_card.hint,
+        )
 
     def load_base(self, user, days=None):
-        # Load cards for N repeat days from DB for /load_N bot command
+        """
+        Загружает карточки для пользователя с учётом фильтра дней.
+        """
         self.loaded_data = []
-        user_id = user.user_id
-        today_date = datetime.date.today()
-        if days:
-            if days == 'all':
-                db_user_cards = Card.select().where(Card.user_id == user_id)
-            else:
-                days_delta = datetime.timedelta(days=int(days))
-                load_before_date = today_date + days_delta
-                db_user_cards = Card.select().where((Card.repeat_date <= load_before_date) & (Card.user_id == user_id))
+        today = datetime.date.today()
+
+        if days == 'all':
+            db_cards = Card.select().where(Card.user_id == user.user_id)
+        elif days is not None:
+            db_cards = Card.select().where(
+                (Card.user_id == user.user_id) &
+                (Card.repeat_date <= today + datetime.timedelta(days=int(days)))
+            )
         else:
-            db_user_cards = Card.select().where((Card.repeat_date <= today_date) & (Card.user_id == user_id))
-        if db_user_cards:
-            for db_card in db_user_cards:
-                card = MindCard(word_one=db_card.word_one,
-                                word_two=db_card.word_two,
-                                user_id=user.user_id,
-                                repeat_lvl=db_card.repeat_lvl,
-                                card_id=db_card.card_id)
-                self.loaded_data.append(card)
+            db_cards = Card.select().where(
+                (Card.user_id == user.user_id) & (Card.repeat_date <= today)
+            )
+
+        for db_card in db_cards:
+            self.loaded_data.append(self._mk_mindcard(db_card, user.user_id))
         return self.loaded_data
 
     def load_today_cards(self):
-        # Load list of cards where Card.repeat_date <= today_date from DB
-        # Turn to MindCard list and return it
-        def def_value():
-            return []
-
-        today_date = datetime.date.today()
-        db_user_cards = Card.select().where(Card.repeat_date <= today_date)
-        cards_return = defaultdict(def_value)
-        for db_card in db_user_cards:
-            card = MindCard(word_one=db_card.word_one,
-                            word_two=db_card.word_two,
-                            user_id=db_card.user_id,
-                            repeat_lvl=db_card.repeat_lvl,
-                            card_id=db_card.card_id)
-            cards_return[card.user_id].append(card)
-        return cards_return
+        """
+        Загружает карточки, которые нужно повторить сегодня, сгруппированные по user_id.
+        """
+        today = datetime.date.today()
+        res = defaultdict(list)
+        for db_card in Card.select().where(Card.repeat_date <= today):
+            res[db_card.user_id].append(self._mk_mindcard(db_card, db_card.user_id))
+        return res
 
     def word_check(self, user, word):
         card_response = []

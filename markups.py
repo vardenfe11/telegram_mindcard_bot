@@ -240,40 +240,62 @@ moon = ['⓿', '➊', '➋', '➌', '➍']
 
 
 def card_markup(card, back=None):
-    func_name = 'repeat_cards'
+    """
+    Формирует inline-клавиатуру для режима повторения одной карточки
+    с учётом логики показа/управления подсказками.
+    """
+    func_repeat = 'repeat_cards'
+    func_hint = 'hint'
+
+    # ───────────  Выбор отображаемого слова  ───────────
     if (card.today_reverse_repeat == 0 and card.today_repeat - card.repeat_mistake < 3) or \
             card.today_repeat < divmod(6 + card.repeat_mistake, 2)[0]:
-        word_one, word_two = card.word_one, card.word_two
+        w_front, w_back = card.word_one, card.word_two
     else:
-        word_two, word_one = card.word_one, card.word_two
+        w_back, w_front = card.word_one, card.word_two
+
     if back:
-        word = word_two
+        word = w_back
         reverse = 'back'
     else:
-        word = word_one
+        word = w_front
         reverse = 'front'
+
     if card.repeat_lvl < 4:
-        word = moon[int(floor(card.repeat_lvl)) + 1] + ' ' + word
+        word = f'{moon[int(floor(card.repeat_lvl)) + 1]} {word}'
+
+    # ───────────  Верхний ряд — управление подсказками  ───────────
+    if card.hint_shown:
+        if card.temp_hint:                                       # показана НОВАЯ
+            hint_row = [
+                InlineKeyboardButton('✅', callback_data=f'{func_hint} {card.card_id} replace'),
+                InlineKeyboardButton('↩️', callback_data=f'{func_hint} {card.card_id} cancel'),
+            ]
+        else:                                                    # показана СОХРАНЁННАЯ
+            hint_row = [
+                InlineKeyboardButton('♻️', callback_data=f'{func_hint} {card.card_id} new'),
+                InlineKeyboardButton('🗑', callback_data=f'{func_hint} {card.card_id} delete'),
+            ]
+    else:                                                        # подсказка скрыта
+        hint_row = [
+            InlineKeyboardButton('💡', callback_data=f'{func_hint} {card.card_id} toggle'),
+        ]
+
+    # ───────────  Остальные ряды (как раньше, но без старой 💡) ───────────
     buttons = [
-        [
-            InlineKeyboardButton(f'{word}',
-                                 callback_data=f'{func_name} {card.card_id} {reverse}'),
-        ],
+        hint_row,
+        [InlineKeyboardButton(word, callback_data=f'{func_repeat} {card.card_id} {reverse}')],
         [
             InlineKeyboardButton(f'✔{card.today_repeat + card.today_reverse_repeat - card.repeat_mistake}',
-                                 callback_data=f'{func_name} {card.card_id} remember'),
-            InlineKeyboardButton(f'✖{card.repeat_mistake}', callback_data=f'{func_name} {card.card_id} forgot')
+                                 callback_data=f'{func_repeat} {card.card_id} remember'),
+            InlineKeyboardButton(f'✖{card.repeat_mistake}', callback_data=f'{func_repeat} {card.card_id} forgot'),
         ],
         [
-            InlineKeyboardButton(f'🎵', callback_data=f'{func_name} {card.card_id} listen{reverse}'),
-            InlineKeyboardButton(f'💡', callback_data=f'{func_name} {card.card_id} ai'),
-            InlineKeyboardButton(f'🗑', callback_data=f'{func_name} {card.card_id} delete'),
+            InlineKeyboardButton('🎵', callback_data=f'{func_repeat} {card.card_id} listen{reverse}'),
+            InlineKeyboardButton('🗑', callback_data=f'{func_repeat} {card.card_id} delete'),
         ],
     ]
-    message_markup = InlineKeyboardMarkup(buttons)
-    return message_markup
-
-
+    return InlineKeyboardMarkup(buttons)
 def message_delete(word):
     save_button = [
         (InlineKeyboardButton(f'{word} ✖', callback_data=f'message_delete None None')),
