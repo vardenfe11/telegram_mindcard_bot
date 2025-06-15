@@ -17,7 +17,6 @@ def get_mem_hint(word, translation):
     response = client.chat.completions.create(
         model=ai_settings.MODEL,
         messages=messages,
-        temperature=0.7,
     )
     return response.choices[0].message.content
 
@@ -34,3 +33,7 @@ def ensure_hint(card, db):
     db.update_base([card])
     return card.hint
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# for m in client.models.list():
+#     print(m.id)          # доступные модели
+# get_mem_hint('word', 'слово')

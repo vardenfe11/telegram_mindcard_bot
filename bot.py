@@ -4,8 +4,9 @@ import os
 import random
 from functools import reduce
 from gtts import gTTS
+import threading
 
-from ai import ensure_hint, get_mem_hint   # ensure_hint используется в обработчике
+from ai import ensure_hint, get_mem_hint  # ensure_hint используется в обработчике
 from markups import markups
 from googletrans import Translator
 from db_manager import DataBaseUpdater, UserUpdater
@@ -32,7 +33,7 @@ logging.getLogger("telegram.vendor.ptb_urllib3.urllib3.connection.VerifiedHTTPSC
 logging.getLogger("telegram.ext.dispatcher").setLevel(logging.CRITICAL)
 log = logging.getLogger()
 stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+stream_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
 log.addHandler(stream_handler)
 log.setLevel(logging.INFO)
 stream_handler.setLevel(logging.INFO)
@@ -94,6 +95,8 @@ class User:
                 self.mindcards_delayed.append(card)
                 self.mindcards.remove(card)
                 self.repeat_time = datetime.datetime.today()
+                card.hint_shown = False
+                card.temp_hint = None
                 return card
             else:
                 if (card.repeat_mistake < 2 and card.repeat_lvl < 4) or card.repeat_mistake == 0:
@@ -104,6 +107,8 @@ class User:
                 self.save()
                 card = self.get_card(db)
                 if card:
+                    card.hint_shown = False
+                    card.temp_hint = None
                     return card
 
     def save(self):
@@ -137,6 +142,7 @@ class Bot:
             'change_name': self.change_name,
             'stats': self.stats,
             'hint': self.hint_handler,
+            'wait': lambda *args, **kwargs: None,
         }
 
     def run(self):
@@ -168,19 +174,52 @@ class Bot:
         card_id = int(button[1])
         action = button[2]
         card = user.get_card_by_id(card_id)
+        # Если подсказка уже генерируется — молча игнорируем повторные клики
+        if getattr(card, 'hint_pending', False):
+            return None
+        need_async_gen = (
+                (action == 'new') or
+                (action == 'toggle' and card.hint is None)
+        )
 
+        # Если подсказка уже генерируется — молча игнорируем повторные клики
+        if getattr(card, 'hint_pending', False):
+            return None
+        need_async_gen = (
+                (action == 'new') or
+                (action == 'toggle' and card.hint is None)
+        )
+
+        if need_async_gen:
+            # Помечаем карту как «в обработке»
+            card.hint_pending = True
+            card.hint_shown = False
+            card.temp_hint = None  # на всякий случай
+
+            # Сразу показываем «⌛»-клавиатуру
+            cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+            base_text = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+            base_text += '\n\n⌛ Generating hint…'
+
+            markup = markups['card_markup'](card)
+
+            # Запускаем отдельный поток
+            threading.Thread(
+                target=self._generate_hint_async,
+                args=(
+                    card,
+                    user,
+                    update.callback_query.message.chat_id,
+                    update.callback_query.message.message_id,
+                    context,
+                    action == 'new',  # replace_current=True  ➜ temp_hint
+                ),
+                daemon=True).start()
+
+            return [base_text, markup, None]
         # --- toggle ---------------------------------------------------------
         if action == 'toggle':
-            if card.hint is None:                         # ещё нет сохранённой
-                card.hint = ensure_hint(card, self.db)
-                card.hint_shown = True
-            else:
-                card.hint_shown = not card.hint_shown
-            card.temp_hint = None                         # сброс временных
-        # --- new ------------------------------------------------------------
-        elif action == 'new':
-            card.temp_hint = get_mem_hint(card.word_one, card.word_two)
-            card.hint_shown = True
+            card.hint_shown = not card.hint_shown
         # --- delete ---------------------------------------------------------
         elif action == 'delete':
             card.hint = None
@@ -189,7 +228,7 @@ class Bot:
             self.db.update_base([card])
         # --- replace / save -------------------------------------------------
         elif action == 'replace':
-            if card.temp_hint:            # temp_hint становится основной
+            if card.temp_hint:  # temp_hint становится основной
                 card.hint = card.temp_hint
                 card.temp_hint = None
             card.hint_shown = True
@@ -210,6 +249,44 @@ class Bot:
         markup = markups['card_markup'](card)
         return [base_text, markup, None]
 
+    def _generate_hint_async(
+            self, card, user, chat_id, message_id, context, replace_current: bool):
+        """
+        Отдельный поток: спрашивает OpenAI, заполняет card,
+        снимает «pending» и редактирует сообщение с готовой подсказкой.
+        """
+        try:
+            # 1) сам запрос
+            if replace_current:
+                card.temp_hint = get_mem_hint(card.word_one, card.word_two)
+            else:
+                card.hint = get_mem_hint(card.word_one, card.word_two)
+                # если это «постоянная» подсказка — сразу пишем в БД
+                self.db.update_base([card])
+
+            # 2) снимаем флаг
+            card.hint_pending = False
+            card.hint_shown = True
+
+            # 3) собираем финальный текст/клавиатуру
+            cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+            text = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+
+            hint_text = card.temp_hint if card.temp_hint else card.hint
+            text += f'\n\n💡 *Hint*\n{hint_text}'
+
+            markup = markups['card_markup'](card)
+
+            # 4) показываем пользователю
+            context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=markup,
+                parse_mode='Markdown')
+        except Exception:
+            logging.exception('Ошибка при асинхронной генерации подсказки')
+            card.hint_pending = False  # сбрасываем, чтобы не зависло
 
     def handle_messages(self, update: Update, context: CallbackContext):
         self.user_check(update)
@@ -393,6 +470,7 @@ class Bot:
                 time_bonus = 0
                 card = self.user_card[user.user_id]
                 if card:
+                    card.hint_shown = False
                     if card.repeat_lvl >= 0:
                         if (user.repeat_time + datetime.timedelta(seconds=3)) > answer_time and \
                                 card.repeat_mistake == 0:
@@ -426,7 +504,8 @@ class Bot:
                 if not os.path.exists('audio'):
                     os.makedirs('audio')
                 card = self.user_card[user.user_id]
-
+                if card:
+                    card.hint_shown = False
                 if (card.today_reverse_repeat == 0 and card.today_repeat - card.repeat_mistake < 3) or \
                         card.today_repeat < divmod(6 + card.repeat_mistake, 2)[0]:
                     if button_answer == 'listenfront':
@@ -448,6 +527,9 @@ class Bot:
             elif button_answer == 'front' or button_answer == 'back':
                 user.state = 'repeat'
                 user.save()
+                card = self.user_card[user.user_id]
+                if card:
+                    card.hint_shown = False
                 if button_answer == 'front':
                     back = True
                 else:
@@ -456,17 +538,6 @@ class Bot:
                 cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
                 send_message = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
                 return [send_message, inline_markup, None]
-            # elif button_answer == 'ai':
-            #     user.state = 'repeat'
-            #     user.save()
-            #     card = self.user_card[user.user_id]
-            #     word = card.word_one
-            #     translation = card.word_two
-            #     ai_hint = get_mem_hint(word, translation)
-            #     if ai_hint:
-            #         context.bot.send_message(update.effective_chat.id, ai_hint, reply_markup=markups['message_delete'](''))
-            #     else:
-            #         context.bot.send_message(update.effective_chat.id, 'no hint :(', reply_markup=markups['message_delete'](''))
 
         else:
             # no button

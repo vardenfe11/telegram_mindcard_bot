@@ -42,6 +42,7 @@ class MindCard:
         self.hint: Optional[str] = hint          # сохранённая мнемоника
         self.hint_shown: bool = False           # отображается ли сейчас?
         self.temp_hint: Optional[str] = None    # временно сгенерированная
+        self.hint_pending: bool = False  # идёт генерация?
         # ---------------------------------------------------------------------
 
 

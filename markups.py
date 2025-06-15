@@ -265,7 +265,12 @@ def card_markup(card, back=None):
         word = f'{moon[int(floor(card.repeat_lvl)) + 1]} {word}'
 
     # ───────────  Верхний ряд — управление подсказками  ───────────
-    if card.hint_shown:
+        # ⏳ Кнопка генерации «закрыта» во время ожидания ответа
+    if getattr(card, 'hint_pending', False):
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton(f'🗿 {card.word_one}', callback_data='wait')]]
+        )
+    elif card.hint_shown:
         if card.temp_hint:                                       # показана НОВАЯ
             hint_row = [
                 InlineKeyboardButton('✅', callback_data=f'{func_hint} {card.card_id} replace'),
