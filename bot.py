@@ -63,6 +63,18 @@ class User:
         self.second_lang = 1
         self.add_cards_to_stack = True
 
+    def finalize_card(self, card, db):
+        """Remove card from active stack and update DB when it is repeated"""
+        if (card.repeat_mistake < 2 and card.repeat_lvl < 4) or card.repeat_mistake == 0:
+            card.repeat_lvl += 1
+        db.update_base([card])
+        if card in self.mindcards:
+            self.mindcards.remove(card)
+        if card in self.mindcards_delayed:
+            self.mindcards_delayed.remove(card)
+        self.score += 1
+        self.save()
+
     def get_card_by_id(self, card_id):
         for card in self.mindcards:
             if card.card_id == card_id:
@@ -99,12 +111,7 @@ class User:
                 card.temp_hint = None
                 return card
             else:
-                if (card.repeat_mistake < 2 and card.repeat_lvl < 4) or card.repeat_mistake == 0:
-                    card.repeat_lvl += 1
-                db.update_base([card])
-                self.mindcards.remove(card)
-                self.score += 1
-                self.save()
+                self.finalize_card(card, db)
                 card = self.get_card(db)
                 if card:
                     card.hint_shown = False
@@ -486,6 +493,9 @@ class Bot:
                         card.today_reverse_repeat += 1 + time_bonus
                     if button_answer == 'forgot':
                         card.repeat_mistake += 1
+                    if button_answer == 'remember' and \
+                            (card.today_repeat + card.today_reverse_repeat) >= (6 + card.repeat_mistake):
+                        user.finalize_card(card, self.db)
                     self.user_card[user.user_id] = user.get_card(self.db)
             elif button_answer == 'delete' and self.user_card[user.user_id]:
                 user.state = 'delete'
@@ -535,8 +545,9 @@ class Bot:
                 else:
                     back = None
                 inline_markup = markups['card_markup'](self.user_card[user.user_id], back)
-                cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
-                send_message = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+                stack_left = len(user.mindcards) + len(user.mindcards_delayed)
+                total_left = stack_left + len(user.mindcards_queuing)
+                send_message = MESSAGE[user.interface_lang]['repeat'] + f"{stack_left}({total_left})"
                 return [send_message, inline_markup, None]
 
         else:
@@ -553,8 +564,9 @@ class Bot:
         if self.user_card[user.user_id] and user.state == 'repeat':
             card = self.user_card[user.user_id]
             inline_markup = markups['card_markup'](card)
-            cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
-            send_message = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+            stack_left = len(user.mindcards) + len(user.mindcards_delayed)
+            total_left = stack_left + len(user.mindcards_queuing)
+            send_message = MESSAGE[user.interface_lang]['repeat'] + f"{stack_left}({total_left})"
             if button:
                 return [send_message, inline_markup, None]
             else:
