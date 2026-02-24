@@ -1,4 +1,4 @@
-googletrans==4.0.0rc1
+deep-translator
 gTTS==2.3.0
 langdetect==1.0.9
 peewee==3.15.4

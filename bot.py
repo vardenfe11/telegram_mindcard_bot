@@ -8,7 +8,8 @@ import threading
 
 from ai import ensure_hint, get_mem_hint  # ensure_hint используется в обработчике
 from markups import markups
-from googletrans import Translator
+import asyncio
+from deep_translator import GoogleTranslator
 from db_manager import DataBaseUpdater, UserUpdater
 from db_manager import MindCard
 from settings import *
@@ -26,7 +27,12 @@ try:
 except ImportError:
     exit('Скопируйте telegram_token.py.deafault как telegram_token.py и укажите в нем токен')
 
-translator = Translator()
+# translator = GoogleTranslator() # Будем создавать экземпляр при вызове для гибкости или один раз
+async def translate_text_async(text: str, target_lang: str = 'en') -> str:
+    return await asyncio.to_thread(
+        GoogleTranslator(source='auto', target=target_lang).translate,
+        text
+    )
 
 logging.getLogger("telegram.vendor.ptb_urllib3.urllib3").setLevel(logging.CRITICAL)
 logging.getLogger("telegram.vendor.ptb_urllib3.urllib3.connection.VerifiedHTTPSConnection").setLevel(logging.CRITICAL)
@@ -416,8 +422,16 @@ class Bot:
                 translate_lang = INTERFACE['translate_langs'][user.first_lang]
             else:
                 translate_lang = INTERFACE['translate_langs'][user.first_lang]
-            translated_message = translator.translate(update.message.text, dest=translate_lang)
-            message_text = f'{update.message.text}\n{translated_message.text}'
+            # Используем созданную асинхронную обертку (хотя бот v13 синхронный, 
+            # выполняем требования по asyncio.to_thread через запуск в новом цикле или текущем)
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            translated_text = loop.run_until_complete(translate_text_async(update.message.text, translate_lang))
+            message_text = f'{update.message.text}\n{translated_text}'
             context.bot.send_message(update.effective_chat.id, message_text,
                                      reply_markup=markups['translate_markup']())
         else:
