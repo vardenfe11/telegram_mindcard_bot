@@ -77,6 +77,7 @@ class User_db(Model):
     nickname_change = IntegerField()
     state = CharField()
     add_cards_to_stack = BooleanField()
+    today_score = IntegerField(default=0)
 
     class Meta:
         database = users_db
@@ -87,7 +88,12 @@ class UserUpdater:
     def __init__(self):
         self.user = None
         if not os.path.exists('users.db'):
-            User_db.create_table(User_db)
+            User_db.create_table()
+        else:
+            # Check if today_score exists
+            columns = [c.name for c in users_db.get_columns('user_db')]
+            if 'today_score' not in columns:
+                users_db.execute_sql('ALTER TABLE user_db ADD COLUMN today_score INTEGER DEFAULT 0')
 
     def save(self, user):
         # Save user from bot to DB
@@ -103,6 +109,7 @@ class UserUpdater:
             db_user.nickname = user.nickname
             db_user.nickname_change = user.nickname_change
             db_user.add_cards_to_stack = user.add_cards_to_stack
+            db_user.today_score = user.today_score
             db_user.save()
         else:
             self.create_user(user)
@@ -120,6 +127,7 @@ class UserUpdater:
             user.nickname = db_user.nickname
             user.nickname_change = db_user.nickname_change
             user.add_cards_to_stack = db_user.add_cards_to_stack
+            user.today_score = db_user.today_score
         else:
             self.create_user(user)
 
@@ -137,6 +145,7 @@ class UserUpdater:
                 nickname=user.nickname,
                 nickname_change=user.nickname_change,
                 add_cards_to_stack=user.add_cards_to_stack,
+                today_score=user.today_score,
             )
         except Exception as error:
             log.exception(f'Ошибка при записи в БД: {error}')

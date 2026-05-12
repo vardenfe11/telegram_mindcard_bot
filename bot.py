@@ -65,6 +65,7 @@ class User:
         self.first_lang = 0
         self.second_lang = 1
         self.add_cards_to_stack = True
+        self.today_score = 0
 
     def finalize_card(self, card, db):
         """Remove card from active stack and update DB when it is repeated"""
@@ -76,6 +77,7 @@ class User:
         if card in self.mindcards_delayed:
             self.mindcards_delayed.remove(card)
         self.score += 1
+        self.today_score += 1
         self.save()
 
     def get_card_by_id(self, card_id):
@@ -363,6 +365,12 @@ class Bot:
         if self.repeat < datetime.date.today():
             if datetime.datetime.today().hour > 8:
                 self.repeat = datetime.date.today()
+                # Reset today_score for all users in memory and DB
+                from db_manager import User_db
+                User_db.update(today_score=0).execute()
+                for u in self.users.values():
+                    u.today_score = 0
+
                 self.load_today_cards(update)
                 if self.repeat.weekday() == 0:
                     self.user_db.load_stats(users=self.users)
@@ -554,7 +562,12 @@ class Bot:
                 inline_markup = markups['card_markup'](self.user_card[user.user_id], back)
                 stack_left = len(user.mindcards) + len(user.mindcards_delayed)
                 total_left = stack_left + len(user.mindcards_queuing)
-                send_message = MESSAGE[user.interface_lang]['repeat'] + f"{stack_left}({total_left})"
+                if user.add_cards_to_stack:
+                    count_before_brackets = user.today_score
+                else:
+                    count_before_brackets = stack_left
+
+                send_message = MESSAGE[user.interface_lang]['repeat'] + f"{count_before_brackets}({total_left})"
                 return [send_message, inline_markup, None]
 
         else:
@@ -573,7 +586,12 @@ class Bot:
             inline_markup = markups['card_markup'](card)
             stack_left = len(user.mindcards) + len(user.mindcards_delayed)
             total_left = stack_left + len(user.mindcards_queuing)
-            send_message = MESSAGE[user.interface_lang]['repeat'] + f"{stack_left}({total_left})"
+            if user.add_cards_to_stack:
+                count_before_brackets = user.today_score
+            else:
+                count_before_brackets = stack_left
+
+            send_message = MESSAGE[user.interface_lang]['repeat'] + f"{count_before_brackets}({total_left})"
             if button:
                 return [send_message, inline_markup, None]
             else:
