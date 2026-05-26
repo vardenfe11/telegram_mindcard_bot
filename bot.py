@@ -142,7 +142,16 @@ class Bot:
         self.markup = defaultdict(default_markup)
         self.db = DataBaseUpdater()
         self.user_db = UserUpdater()
-        self.repeat = datetime.date.today()
+        try:
+            with open('last_reset.txt', 'r') as f:
+                self.repeat = datetime.date.fromisoformat(f.read().strip())
+        except Exception:
+            now = datetime.datetime.today()
+            if now.hour > 8:
+                self.repeat = now.date()
+            else:
+                self.repeat = now.date() - datetime.timedelta(days=1)
+        
         self.button_handlers = {
             'load': self.load,
             'repeat_cards': self.repeat_cards,
@@ -209,8 +218,12 @@ class Bot:
             card.temp_hint = None  # на всякий случай
 
             # Сразу показываем «⌛»-клавиатуру
-            cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
-            base_text = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+            total_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+            if user.add_cards_to_stack:
+                count_before_brackets = user.today_score
+            else:
+                count_before_brackets = len(user.mindcards) + len(user.mindcards_delayed)
+            base_text = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
             base_text += '\n\n⌛ Generating hint…'
 
             markup = markups['card_markup'](card)
@@ -251,8 +264,12 @@ class Bot:
             card.hint_shown = bool(card.hint)
 
         # ───── обновляем сообщение ─────
-        cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
-        base_text = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+        total_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+        if user.add_cards_to_stack:
+            count_before_brackets = user.today_score
+        else:
+            count_before_brackets = len(user.mindcards) + len(user.mindcards_delayed)
+        base_text = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
 
         if card.hint_shown:
             hint_text = card.temp_hint if card.temp_hint else card.hint
@@ -281,8 +298,12 @@ class Bot:
             card.hint_shown = True
 
             # 3) собираем финальный текст/клавиатуру
-            cards_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
-            text = MESSAGE[user.interface_lang]['repeat'] + str(cards_left)
+            total_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+            if user.add_cards_to_stack:
+                count_before_brackets = user.today_score
+            else:
+                count_before_brackets = len(user.mindcards) + len(user.mindcards_delayed)
+            text = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
 
             hint_text = card.temp_hint if card.temp_hint else card.hint
             text += f'\n\n💡 *Hint*\n{hint_text}'
@@ -365,6 +386,12 @@ class Bot:
         if self.repeat < datetime.date.today():
             if datetime.datetime.today().hour > 8:
                 self.repeat = datetime.date.today()
+                try:
+                    with open('last_reset.txt', 'w') as f:
+                        f.write(self.repeat.isoformat())
+                except Exception as e:
+                    log.error(f"Failed to save last_reset.txt: {e}")
+
                 # Reset today_score for all users in memory and DB
                 from db_manager import User_db
                 User_db.update(today_score=0).execute()
@@ -567,7 +594,7 @@ class Bot:
                 else:
                     count_before_brackets = stack_left
 
-                send_message = MESSAGE[user.interface_lang]['repeat'] + f"{count_before_brackets}({total_left})"
+                send_message = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
                 return [send_message, inline_markup, None]
 
         else:
@@ -591,7 +618,7 @@ class Bot:
             else:
                 count_before_brackets = stack_left
 
-            send_message = MESSAGE[user.interface_lang]['repeat'] + f"{count_before_brackets}({total_left})"
+            send_message = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
             if button:
                 return [send_message, inline_markup, None]
             else:
