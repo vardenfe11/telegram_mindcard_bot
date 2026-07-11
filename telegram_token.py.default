@@ -5,4 +5,9 @@ YOOMONEY = 'https://yoomoney.ru/to/4100117821629931'
 PAYPAL = 'https://paypal.me/vardenfell'
 
 # Google Gemini API Key
-GEMINI_API_KEY = ''
+GEMINI_API_KEY = ''
+
+# Базовый URL для Gemini API (позволяет использовать прокси-зеркала для обхода региональных блокировок)
+# Например: 'https://gateway.ai.cloudflare.com/v1/.../gemini' или альтернативные зеркала
+GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com'
+

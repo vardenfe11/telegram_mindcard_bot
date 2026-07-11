@@ -6,14 +6,20 @@ import ai_settings
 
 log = logging.getLogger(__name__)
 
-# Попытка импортировать ключ из telegram_token
+# Попытка импортировать ключ и базовый URL из telegram_token
 try:
-    from telegram_token import GEMINI_API_KEY
+    from telegram_token import GEMINI_API_KEY, GEMINI_BASE_URL
 except ImportError:
     GEMINI_API_KEY = None
+    GEMINI_BASE_URL = None
 
 # Если ключ не задан в telegram_token, пробуем взять из переменной окружения
 API_KEY = GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+if API_KEY:
+    API_KEY = API_KEY.strip()
+
+# Базовый URL для запросов (полезно для обхода блокировок по IP)
+BASE_URL = GEMINI_BASE_URL or os.environ.get("GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com"
 
 
 def get_mem_hint(word, translation):
@@ -27,12 +33,12 @@ def get_mem_hint(word, translation):
         )
 
     model_name = ai_settings.MODEL
-    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-1.5-flash
+    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-2.5-flash
     if not model_name or not model_name.startswith("gemini"):
-        model_name = "gemini-1.5-flash"
+        model_name = "gemini-2.5-flash"
 
     log.info("Requesting mnemonic hint using model: %s", model_name)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
+    url = f"{BASE_URL.rstrip('/')}/v1beta/models/{model_name}:generateContent?key={API_KEY}"
 
     data = {'word': word, 'translation': translation}
     prompt = ai_settings.PROMPT.format(**data)
