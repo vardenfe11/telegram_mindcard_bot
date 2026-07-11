@@ -37,9 +37,9 @@ def get_mem_hint(word, translation):
         )
 
     model_name = ai_settings.MODEL
-    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-2.5-flash
+    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-3.5-flash
     if not model_name or not model_name.startswith("gemini"):
-        model_name = "gemini-2.5-flash"
+        model_name = "gemini-3.5-flash"
 
     log.info("Requesting mnemonic hint using model: %s", model_name)
     url = f"{BASE_URL.rstrip('/')}/v1beta/models/{model_name}:generateContent?key={API_KEY}"
