@@ -281,7 +281,7 @@ class Bot:
     def _generate_hint_async(
             self, card, user, chat_id, message_id, context, replace_current: bool):
         """
-        Отдельный поток: спрашивает OpenAI, заполняет card,
+        Отдельный поток: спрашивает Gemini, заполняет card,
         снимает «pending» и редактирует сообщение с готовой подсказкой.
         """
         try:

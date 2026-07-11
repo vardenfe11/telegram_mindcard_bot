@@ -1,4 +1,6 @@
-MODEL = "gpt-4.1"
+MODEL = "gemini-1.5-flash"
+# MODEL = "gemini-2.5-flash"
+# MODEL = "gemini-1.5-pro"
 # MODEL = "gpt-3.5-turbo"
 # CONTENT = 'Ты — специалист по созданию ассоциаций для запоминания слов при изучении иностранных языков.'
 CONTENT = 'Ты — профессиональный лингвист'
