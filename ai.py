@@ -26,7 +26,13 @@ def get_mem_hint(word, translation):
             "Please set GEMINI_API_KEY in telegram_token.py or as an environment variable."
         )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{ai_settings.MODEL}:generateContent?key={API_KEY}"
+    model_name = ai_settings.MODEL
+    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-1.5-flash
+    if not model_name or not model_name.startswith("gemini"):
+        model_name = "gemini-1.5-flash"
+
+    log.info("Requesting mnemonic hint using model: %s", model_name)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={API_KEY}"
 
     data = {'word': word, 'translation': translation}
     prompt = ai_settings.PROMPT.format(**data)
