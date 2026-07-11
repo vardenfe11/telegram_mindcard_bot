@@ -6,11 +6,15 @@ import ai_settings
 
 log = logging.getLogger(__name__)
 
-# Попытка импортировать ключ и базовый URL из telegram_token
+# Попытка импортировать ключ и базовый URL из telegram_token по отдельности
 try:
-    from telegram_token import GEMINI_API_KEY, GEMINI_BASE_URL
+    from telegram_token import GEMINI_API_KEY
 except ImportError:
     GEMINI_API_KEY = None
+
+try:
+    from telegram_token import GEMINI_BASE_URL
+except ImportError:
     GEMINI_BASE_URL = None
 
 # Если ключ не задан в telegram_token, пробуем взять из переменной окружения
