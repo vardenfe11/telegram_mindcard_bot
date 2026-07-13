@@ -38,13 +38,13 @@ def get_mem_hint(word, translation):
         )
 
     user_model = ai_settings.MODEL
-    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-3.5-flash
+    # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-3.1-flash-lite
     if not user_model or not user_model.startswith("gemini"):
-        user_model = "gemini-3.5-flash"
+        user_model = "gemini-3.1-flash-lite"
 
     # Список кандидатов для перебора (сначала выбранная модель, затем альтернативы)
     candidate_models = [user_model]
-    alternatives = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash"]
+    alternatives = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.0-flash"]
     for alt in alternatives:
         if alt not in candidate_models:
             candidate_models.append(alt)

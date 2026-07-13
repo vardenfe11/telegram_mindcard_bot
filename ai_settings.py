@@ -1,5 +1,5 @@
-MODEL = "gemini-3.5-flash"
-# MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-flash-lite"
+# MODEL = "gemini-3.5-flash"
 # MODEL = "gemini-2.0-flash"
 # MODEL = "gpt-3.5-turbo"
 # CONTENT = 'Ты — специалист по созданию ассоциаций для запоминания слов при изучении иностранных языков.'
