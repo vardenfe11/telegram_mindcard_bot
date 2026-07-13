@@ -267,9 +267,10 @@ def card_markup(card, back=None):
     # ───────────  Верхний ряд — управление подсказками  ───────────
         # ⏳ Кнопка генерации «закрыта» во время ожидания ответа
     if getattr(card, 'hint_pending', False):
-        return InlineKeyboardMarkup(
-            [[InlineKeyboardButton(f'🗿 {card.word_one}', callback_data='wait')]]
-        )
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(f'🗿 {card.word_one}', callback_data='wait')],
+            [InlineKeyboardButton('➡️ Пропустить / Skip', callback_data=f'{func_hint} {card.card_id} skip_pending')]
+        ])
     elif card.hint_shown:
         if card.temp_hint:                                       # показана НОВАЯ
             hint_row = [

@@ -43,6 +43,7 @@ class MindCard:
         self.hint_shown: bool = False           # отображается ли сейчас?
         self.temp_hint: Optional[str] = None    # временно сгенерированная
         self.hint_pending: bool = False  # идёт генерация?
+        self.hint_auto_show: bool = False       # показать автоматически при следующем выборе?
         # ---------------------------------------------------------------------
 
 

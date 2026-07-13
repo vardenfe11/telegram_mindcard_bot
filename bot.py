@@ -112,14 +112,22 @@ class User:
                 self.mindcards_delayed.append(card)
                 self.mindcards.remove(card)
                 self.repeat_time = datetime.datetime.today()
-                card.hint_shown = False
+                if getattr(card, 'hint_auto_show', False):
+                    card.hint_shown = True
+                    card.hint_auto_show = False
+                else:
+                    card.hint_shown = False
                 card.temp_hint = None
                 return card
             else:
                 self.finalize_card(card, db)
                 card = self.get_card(db)
                 if card:
-                    card.hint_shown = False
+                    if getattr(card, 'hint_auto_show', False):
+                        card.hint_shown = True
+                        card.hint_auto_show = False
+                    else:
+                        card.hint_shown = False
                     card.temp_hint = None
                     return card
 
@@ -195,16 +203,8 @@ class Bot:
         card_id = int(button[1])
         action = button[2]
         card = user.get_card_by_id(card_id)
-        # Если подсказка уже генерируется — молча игнорируем повторные клики
-        if getattr(card, 'hint_pending', False):
-            return None
-        need_async_gen = (
-                (action == 'new') or
-                (action == 'toggle' and card.hint is None)
-        )
-
-        # Если подсказка уже генерируется — молча игнорируем повторные клики
-        if getattr(card, 'hint_pending', False):
+        # Если подсказка уже генерируется — молча игнорируем повторные клики (кроме пропуска)
+        if getattr(card, 'hint_pending', False) and action != 'skip_pending':
             return None
         need_async_gen = (
                 (action == 'new') or
@@ -262,6 +262,34 @@ class Bot:
         elif action == 'cancel':
             card.temp_hint = None
             card.hint_shown = bool(card.hint)
+        # --- skip_pending ---------------------------------------------------
+        elif action == 'skip_pending':
+            if card in user.mindcards:
+                user.mindcards.remove(card)
+            if card in user.mindcards_delayed:
+                user.mindcards_delayed.remove(card)
+            if card in user.mindcards_queuing:
+                user.mindcards_queuing.remove(card)
+            user.mindcards_queuing.append(card)
+
+            self.user_card[user.user_id] = user.get_card(self.db)
+
+            if self.user_card[user.user_id]:
+                next_card = self.user_card[user.user_id]
+                next_markup = markups['card_markup'](next_card)
+                stack_left = len(user.mindcards) + len(user.mindcards_delayed)
+                total_left = stack_left + len(user.mindcards_queuing)
+                if user.add_cards_to_stack:
+                    count_before_brackets = user.today_score
+                else:
+                    count_before_brackets = stack_left
+                base_text = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
+                return [base_text, next_markup, None]
+            else:
+                user.state = 'start'
+                user.save()
+                self.markup[user.user_id] = markups['start']
+                return [MESSAGE[user.interface_lang]['no cards'], markups['donate_markup'](), None]
 
         # ───── обновляем сообщение ─────
         total_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
@@ -293,30 +321,35 @@ class Bot:
                 # если это «постоянная» подсказка — сразу пишем в БД
                 self.db.update_base([card])
 
-            # 2) снимаем флаг
+            # 2) снимаем флаг и помечаем на автопоказ
             card.hint_pending = False
-            card.hint_shown = True
+            card.hint_auto_show = True
 
-            # 3) собираем финальный текст/клавиатуру
-            total_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
-            if user.add_cards_to_stack:
-                count_before_brackets = user.today_score
-            else:
-                count_before_brackets = len(user.mindcards) + len(user.mindcards_delayed)
-            text = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
+            # 3) если карточка всё ещё на экране у пользователя, обновляем её в чате
+            current_active_card = self.user_card.get(user.user_id)
+            if current_active_card and current_active_card.card_id == card.card_id:
+                card.hint_shown = True
+                card.hint_auto_show = False
 
-            hint_text = card.temp_hint if card.temp_hint else card.hint
-            text += f'\n\n💡 *Hint*\n{hint_text}'
+                total_left = len(user.mindcards) + len(user.mindcards_delayed) + len(user.mindcards_queuing)
+                if user.add_cards_to_stack:
+                    count_before_brackets = user.today_score
+                else:
+                    count_before_brackets = len(user.mindcards) + len(user.mindcards_delayed)
+                text = MESSAGE[user.interface_lang]['repeat'] + f"{total_left}({count_before_brackets})"
 
-            markup = markups['card_markup'](card)
+                hint_text = card.temp_hint if card.temp_hint else card.hint
+                text += f'\n\n💡 *Hint*\n{hint_text}'
 
-            # 4) показываем пользователю
-            context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                reply_markup=markup,
-                parse_mode='Markdown')
+                markup = markups['card_markup'](card)
+
+                # 4) показываем пользователю
+                context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    reply_markup=markup,
+                    parse_mode='Markdown')
         except Exception:
             logging.exception('Ошибка при асинхронной генерации подсказки')
             card.hint_pending = False  # сбрасываем, чтобы не зависло
