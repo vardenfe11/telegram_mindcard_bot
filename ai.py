@@ -2,6 +2,7 @@ import urllib.request
 import json
 import os
 import logging
+import time
 import ai_settings
 
 log = logging.getLogger(__name__)
@@ -65,13 +66,29 @@ def get_mem_hint(word, translation):
         method='POST'
     )
 
-    try:
-        with urllib.request.urlopen(req) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return result['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        log.exception("Error while generating hint via Gemini API REST")
-        raise e
+    max_retries = 3
+    retry_delay = 1.0  # начальная задержка в секундах
+
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                return result['candidates'][0]['content']['parts'][0]['text']
+        except urllib.error.HTTPError as e:
+            # Повторяем при временных ошибках: 429 (Rate Limit), 500 (Internal Server Error), 503 (Service Unavailable)
+            if e.code in (429, 500, 503) and attempt < max_retries - 1:
+                log.warning(
+                    "Gemini API returned status %d on attempt %d/%d. Retrying in %.1fs...",
+                    e.code, attempt + 1, max_retries, retry_delay
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            log.exception("HTTP Error while generating hint via Gemini API REST")
+            raise e
+        except Exception as e:
+            log.exception("Unexpected error while generating hint via Gemini API REST")
+            raise e
 
 
 
