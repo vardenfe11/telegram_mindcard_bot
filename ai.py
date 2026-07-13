@@ -37,13 +37,17 @@ def get_mem_hint(word, translation):
             "Please set GEMINI_API_KEY in telegram_token.py or as an environment variable."
         )
 
-    model_name = ai_settings.MODEL
+    user_model = ai_settings.MODEL
     # Если в настройках осталась старая модель GPT или модель не указана, используем gemini-3.5-flash
-    if not model_name or not model_name.startswith("gemini"):
-        model_name = "gemini-3.5-flash"
+    if not user_model or not user_model.startswith("gemini"):
+        user_model = "gemini-3.5-flash"
 
-    log.info("Requesting mnemonic hint using model: %s", model_name)
-    url = f"{BASE_URL.rstrip('/')}/v1beta/models/{model_name}:generateContent?key={API_KEY}"
+    # Список кандидатов для перебора (сначала выбранная модель, затем альтернативы)
+    candidate_models = [user_model]
+    alternatives = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.0-flash"]
+    for alt in alternatives:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
 
     data = {'word': word, 'translation': translation}
     prompt = ai_settings.PROMPT.format(**data)
@@ -57,38 +61,64 @@ def get_mem_hint(word, translation):
             "parts": [{"text": prompt}]
         }]
     }
-
     json_data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(
-        url,
-        data=json_data,
-        headers={'Content-Type': 'application/json'},
-        method='POST'
-    )
 
-    max_retries = 3
-    retry_delay = 1.0  # начальная задержка в секундах
+    last_error = None
+    for model_name in candidate_models:
+        log.info("Requesting mnemonic hint using model: %s", model_name)
+        url = f"{BASE_URL.rstrip('/')}/v1beta/models/{model_name}:generateContent?key={API_KEY}"
 
-    for attempt in range(max_retries):
-        try:
-            with urllib.request.urlopen(req) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                return result['candidates'][0]['content']['parts'][0]['text']
-        except urllib.error.HTTPError as e:
-            # Повторяем при временных ошибках: 429 (Rate Limit), 500 (Internal Server Error), 503 (Service Unavailable)
-            if e.code in (429, 500, 503) and attempt < max_retries - 1:
-                log.warning(
-                    "Gemini API returned status %d on attempt %d/%d. Retrying in %.1fs...",
-                    e.code, attempt + 1, max_retries, retry_delay
+        # 2 попытки на каждую модель
+        max_retries = 2
+        retry_delay = 1.0
+
+        for attempt in range(max_retries):
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json_data,
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
                 )
-                time.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            log.exception("HTTP Error while generating hint via Gemini API REST")
-            raise e
-        except Exception as e:
-            log.exception("Unexpected error while generating hint via Gemini API REST")
-            raise e
+                with urllib.request.urlopen(req) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    return result['candidates'][0]['content']['parts'][0]['text']
+            except urllib.error.HTTPError as e:
+                last_error = e
+                # Повторяем при временных ошибках: 429 (Rate Limit), 500 (Internal Error), 503 (Service Unavailable)
+                if e.code in (429, 500, 503):
+                    if attempt < max_retries - 1:
+                        log.warning(
+                            "Gemini API (model: %s) returned status %d on attempt %d/%d. Retrying in %.1fs...",
+                            model_name, e.code, attempt + 1, max_retries, retry_delay
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    else:
+                        log.warning(
+                            "Gemini API (model: %s) failed with status %d after %d attempts. Trying fallback model...",
+                            model_name, e.code, max_retries
+                        )
+                        break  # переходим к следующей модели из candidate_models
+                else:
+                    # Другие HTTP ошибки (например, 404 или 400) - переключаемся на следующую модель без повторов
+                    log.warning(
+                        "Gemini API (model: %s) returned non-retryable status %d: %s. Trying fallback model...",
+                        model_name, e.code, e.reason
+                    )
+                    break
+            except Exception as e:
+                last_error = e
+                log.warning("Unexpected error with model %s: %s. Trying fallback model...", model_name, str(e))
+                break
+
+    # Если перебрали все модели и ни одна не сработала
+    log.error("All Gemini models failed to generate mnemonic hint.")
+    if last_error:
+        raise last_error
+    else:
+        raise RuntimeError("All Gemini models failed")
 
 
 
