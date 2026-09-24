@@ -4,13 +4,16 @@ from settings import FLAGS
 
 def detect_lang(text):
     # detect the text language
-    langs = detect_langs(text)
-    word_lang = None
-    for lang in langs:
-        if lang.lang in FLAGS:
-            word_lang = lang.lang
-            break
-    return word_lang
+    try:
+        langs = detect_langs(text)
+        word_lang = None
+        for lang in langs:
+            if lang.lang in FLAGS:
+                word_lang = lang.lang
+                break
+        return word_lang
+    except Exception:
+        return None
 
 
 def button_compare(message_edit, keyboard2):

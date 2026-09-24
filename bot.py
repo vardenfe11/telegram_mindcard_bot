@@ -6,7 +6,11 @@ from functools import reduce
 from gtts import gTTS
 import threading
 
-from ai import ensure_hint, get_mem_hint  # ensure_hint используется в обработчике
+import json
+import urllib.parse
+import urllib.request
+
+from ai import ensure_hint, get_mem_hint, translate_ai  # ensure_hint используется в обработчике
 from markups import markups
 import asyncio
 from deep_translator import GoogleTranslator
@@ -27,9 +31,46 @@ try:
 except ImportError:
     exit('Скопируйте telegram_token.py.deafault как telegram_token.py и укажите в нем токен')
 
-# translator = GoogleTranslator() # Будем создавать экземпляр при вызове для гибкости или один раз
+
 def translate_text(text: str, target_lang: str = 'en') -> str:
-    return GoogleTranslator(source='auto', target=target_lang).translate(text)
+    # 1. Основной надежный API Google Translate (client=gtx, без ограничений scraping-а)
+    try:
+        url = 'https://translate.googleapis.com/translate_a/single?' + urllib.parse.urlencode({
+            'client': 'gtx',
+            'sl': 'auto',
+            'tl': target_lang,
+            'dt': 't',
+            'q': text,
+        })
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            translated = ''.join(chunk[0] for chunk in data[0] if chunk and chunk[0])
+            if translated and translated.strip():
+                return translated.strip()
+    except Exception as e:
+        log.warning(f'googleapis translation failed: {e}')
+
+    # 2. Резервный перевод через deep_translator
+    try:
+        translated = GoogleTranslator(source='auto', target=target_lang).translate(text)
+        if translated and translated.strip():
+            return translated.strip()
+    except Exception as e:
+        log.warning(f'deep_translator fallback failed: {e}')
+
+    # 3. Резервный перевод через Gemini AI (если задан GEMINI_API_KEY)
+    try:
+        translated = translate_ai(text, target_lang)
+        if translated and translated.strip():
+            return translated.strip()
+    except Exception as e:
+        log.warning(f'Gemini translation fallback failed: {e}')
+
+    raise RuntimeError(f'All translation methods failed for text: {text[:50]}')
 
 logging.getLogger("telegram.vendor.ptb_urllib3.urllib3").setLevel(logging.CRITICAL)
 logging.getLogger("telegram.vendor.ptb_urllib3.urllib3.connection.VerifiedHTTPSConnection").setLevel(logging.CRITICAL)
@@ -100,9 +141,8 @@ class User:
                 or len(self.mindcards_queuing) < self.stack_size:
             while (len(self.mindcards) + len(self.mindcards_delayed)) < self.stack_size and len(
                     self.mindcards_queuing) > 0:
-                card = self.mindcards_queuing[0]
+                card = self.mindcards_queuing.pop(random.randrange(len(self.mindcards_queuing)))
                 self.mindcards.append(card)
-                self.mindcards_queuing.remove(card)
         while len(self.mindcards) > 0 or len(self.mindcards_delayed) > 0:
             if len(self.mindcards) == 0 and len(self.mindcards_delayed) > 0:
                 self.mindcards = self.mindcards_delayed
@@ -371,6 +411,7 @@ class Bot:
         self.users[user_id] = user
         users_db_cards = self.db.load_base(user)
         if users_db_cards:
+            random.shuffle(users_db_cards)
             self.users[user_id].mindcards_queuing = users_db_cards
 
     def on_event(self, update, context):
@@ -834,6 +875,8 @@ class Bot:
                         self.new_user(db_card.user_id)
                         log.info(f'New user is created, user_id: {user_id} {update.message.from_user.username}')
                         self.users[db_card.user_id].mindcards_queuing.append(db_card)
+                if user.user_id in self.users:
+                    random.shuffle(self.users[user.user_id].mindcards_queuing)
 
     def load_user_cards(self, update: Update, context: CallbackContext, button=None):
         user = self.user_check(update)

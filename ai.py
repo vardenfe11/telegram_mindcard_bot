@@ -134,7 +134,56 @@ def ensure_hint(card, db):
     db.update_base([card])
     return card.hint
 # ─────────────────────────────────────────────────────────────────────────────
-#
-# for m in client.models.list():
-#     print(m.id)          # доступные модели
-# get_mem_hint('word', 'слово')
+def translate_ai(text: str, target_lang: str = 'en') -> str:
+    """
+    Резервный перевод слова или фразы через Google Gemini API.
+    """
+    if not API_KEY:
+        raise ValueError("GEMINI_API_KEY is not configured")
+
+    user_model = ai_settings.MODEL
+    if not user_model or not user_model.startswith("gemini"):
+        user_model = "gemini-3.1-flash-lite"
+
+    candidate_models = [user_model]
+    for alt in ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.0-flash"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
+
+    prompt = (
+        f"Translate the following text to language code '{target_lang}'. "
+        f"Return ONLY the direct translation without any explanation, markdown, notes, or extra characters:\n\n{text}"
+    )
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 200,
+        }
+    }
+    json_data = json.dumps(payload).encode('utf-8')
+    last_error = None
+    for model_name in candidate_models:
+        url = f"{BASE_URL.rstrip('/')}/v1beta/models/{model_name}:generateContent?key={API_KEY}"
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json_data,
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                res_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                if res_text:
+                    return res_text
+        except Exception as e:
+            last_error = e
+            log.warning("Gemini translate error with model %s: %s", model_name, e)
+            continue
+    if last_error:
+        raise last_error
+    raise RuntimeError("All Gemini models failed to translate")
