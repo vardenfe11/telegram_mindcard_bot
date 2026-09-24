@@ -5,6 +5,7 @@ import random
 from functools import reduce
 from gtts import gTTS
 import threading
+import pytz
 
 import json
 import urllib.parse
@@ -16,6 +17,7 @@ import asyncio
 from deep_translator import GoogleTranslator
 from db_manager import DataBaseUpdater, UserUpdater
 from db_manager import MindCard
+import settings
 from settings import *
 from handlers import *
 from telegram_token import TOKEN
@@ -83,6 +85,24 @@ log.setLevel(logging.INFO)
 stream_handler.setLevel(logging.INFO)
 
 
+def get_bot_timezone():
+    tz_name = getattr(settings, 'TIMEZONE', 'Europe/Moscow')
+    try:
+        return pytz.timezone(tz_name)
+    except Exception:
+        return pytz.timezone('Europe/Moscow')
+
+
+def get_accounting_date(now=None):
+    if now is None:
+        now = datetime.datetime.now(get_bot_timezone())
+    reset_hour = getattr(settings, 'RESET_HOUR', 8)
+    if now.hour < reset_hour:
+        return (now - datetime.timedelta(days=1)).date()
+    else:
+        return now.date()
+
+
 def def_value():
     return User(0, None)
 
@@ -107,6 +127,14 @@ class User:
         self.second_lang = 1
         self.add_cards_to_stack = True
         self.today_score = 0
+        self.today_date = ''
+
+    def check_daily_reset(self):
+        current_acc_date = get_accounting_date().isoformat()
+        if self.today_date != current_acc_date:
+            self.today_score = 0
+            self.today_date = current_acc_date
+            self.save()
 
     def finalize_card(self, card, db):
         """Remove card from active stack and update DB when it is repeated"""
@@ -117,6 +145,7 @@ class User:
             self.mindcards.remove(card)
         if card in self.mindcards_delayed:
             self.mindcards_delayed.remove(card)
+        self.check_daily_reset()
         self.score += 1
         self.today_score += 1
         self.save()
@@ -176,6 +205,7 @@ class User:
 
     def load(self):
         self.user_db.load(self)
+        self.check_daily_reset()
 
 
 def default_markup():
@@ -194,11 +224,8 @@ class Bot:
             with open('last_reset.txt', 'r') as f:
                 self.repeat = datetime.date.fromisoformat(f.read().strip())
         except Exception:
-            now = datetime.datetime.today()
-            if now.hour > 8:
-                self.repeat = now.date()
-            else:
-                self.repeat = now.date() - datetime.timedelta(days=1)
+            current_acc_date = get_accounting_date()
+            self.repeat = current_acc_date - datetime.timedelta(days=1)
         
         self.button_handlers = {
             'load': self.load,
@@ -229,6 +256,12 @@ class Bot:
         dispatcher.add_handler(CommandHandler('stats', self.stats))
         dispatcher.add_handler(CallbackQueryHandler(self.button))
         dispatcher.add_handler(MessageHandler(Filters.text, self.handle_messages))
+
+        # Автоматический ежедневный сброс ровно в 08:00 MSK через JobQueue
+        tz = get_bot_timezone()
+        reset_time = datetime.time(hour=getattr(settings, 'RESET_HOUR', 8), minute=0, second=0, tzinfo=tz)
+        updater.job_queue.run_daily(self.scheduled_reset, time=reset_time)
+
         updater.start_polling()
 
     # ─────────────────────────────────────────────────────────────────────
@@ -239,7 +272,8 @@ class Bot:
         button = ['hint', card_id, action]
         action: toggle | new | delete | replace | cancel
         """
-        user = self.users[update.callback_query.from_user.id]
+        user = self.user_check(update)
+        user.check_daily_reset()
         card_id = int(button[1])
         action = button[2]
         card = user.get_card_by_id(card_id)
@@ -455,37 +489,59 @@ class Bot:
         context.bot.send_message(update.effective_chat.id, MESSAGE[user.interface_lang]['start'],
                                  reply_markup=self.markup[update.message.from_user.id])
 
+    def perform_daily_reset(self):
+        current_acc_date = get_accounting_date()
+        self.repeat = current_acc_date
+        try:
+            with open('last_reset.txt', 'w') as f:
+                f.write(self.repeat.isoformat())
+        except Exception as e:
+            log.error(f"Failed to save last_reset.txt: {e}")
+
+        # Reset today_score for all users in memory and DB
+        from db_manager import User_db
+        try:
+            User_db.update(today_score=0, today_date=current_acc_date.isoformat()).execute()
+        except Exception as e:
+            log.error(f"Failed to reset today_score in User_db: {e}")
+
+        for u in self.users.values():
+            u.today_score = 0
+            u.today_date = current_acc_date.isoformat()
+
+        try:
+            self.load_today_cards()
+        except Exception as e:
+            log.error(f"Failed to load today cards on reset: {e}")
+
+        if self.repeat.weekday() == 0:
+            try:
+                self.user_db.load_stats(users=self.users)
+            except Exception as e:
+                log.error(f"Failed to load stats on reset: {e}")
+
+        log.info(f"Daily reset successfully completed for accounting date: {self.repeat}")
+
+    def scheduled_reset(self, context=None):
+        log.info("Triggered scheduled daily reset from JobQueue")
+        self.perform_daily_reset()
+
     def user_check(self, update, user_id=None):
-        # every morning reset bot_repeat_date
-        if self.repeat < datetime.date.today():
-            if datetime.datetime.today().hour > 8:
-                self.repeat = datetime.date.today()
-                try:
-                    with open('last_reset.txt', 'w') as f:
-                        f.write(self.repeat.isoformat())
-                except Exception as e:
-                    log.error(f"Failed to save last_reset.txt: {e}")
+        current_acc_date = get_accounting_date()
+        if self.repeat < current_acc_date:
+            self.perform_daily_reset()
 
-                # Reset today_score for all users in memory and DB
-                from db_manager import User_db
-                User_db.update(today_score=0).execute()
-                for u in self.users.values():
-                    u.today_score = 0
-
-                self.load_today_cards(update)
-                if self.repeat.weekday() == 0:
-                    self.user_db.load_stats(users=self.users)
-
-        if update.message:
+        if update and update.message:
             user_id = update.message.from_user.id
             if user_id not in self.users:
                 self.new_user(update.message.from_user.id)
                 log.info(f'New user is created, user_id: {user_id} {update.message.from_user.username}')
-        elif update.callback_query:
+        elif update and update.callback_query:
             user_id = update.callback_query.from_user.id
             if user_id not in self.users:
                 self.new_user(update.callback_query.from_user.id)
         if user_id in self.users:
+            self.users[user_id].check_daily_reset()
             return self.users[user_id]
 
     def pages_handler(self, page_list, func_name, button):
@@ -835,22 +891,20 @@ class Bot:
         self.user_check(update)
         context.bot.delete_message(update.effective_chat.id, update.callback_query.message.message_id)
 
-    def load_today_cards(self, update: Update, context=None):
+    def load_today_cards(self, update: Update = None, context=None):
         '''
         Load cards with today card repeat time from DB
         :param update: from TG
         :return: load cards list for user
         '''
-        user = self.user_check(update)
+        user = self.user_check(update) if update else None
         # load cards where today >= repeat_time from DB
         # list [user.id][MindCard]
         today_cards = self.db.load_today_cards()
         for user_id in today_cards:
-            if user.user_id == user_id:
+            if user is None or user.user_id == user_id:
                 for db_card in today_cards[user_id]:
                     log.debug(f'Today card {db_card.word_one} - {db_card.word_two}, UID:{db_card.user_id}')
-                    # if today_card_user in active_user_list of bot
-                    # else create new active_user and add it to active_user_list and add card to user_cards_list
                     if db_card.user_id in self.users:
                         # then append to mindcards_queuing list
                         card_exist = False
@@ -872,11 +926,12 @@ class Bot:
                         if not card_exist:
                             self.users[db_card.user_id].mindcards_queuing.append(db_card)
                     else:
+                        username = (update.message.from_user.username if (update and update.message and update.message.from_user) else '')
                         self.new_user(db_card.user_id)
-                        log.info(f'New user is created, user_id: {user_id} {update.message.from_user.username}')
+                        log.info(f'New user is created, user_id: {user_id} {username}')
                         self.users[db_card.user_id].mindcards_queuing.append(db_card)
-                if user.user_id in self.users:
-                    random.shuffle(self.users[user.user_id].mindcards_queuing)
+                if user_id in self.users:
+                    random.shuffle(self.users[user_id].mindcards_queuing)
 
     def load_user_cards(self, update: Update, context: CallbackContext, button=None):
         user = self.user_check(update)

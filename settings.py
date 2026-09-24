@@ -138,3 +138,7 @@ INTERFACE = {
     'interface_langs': ['en', 'ru'],
     'translate_langs': ['ru', 'en', 'uk', 'fr', 'es', 'it', 'de', 'zh-CN', 'ja', 'ko', 'hy', 'ka', 'tr', 'sv'],
 }
+
+TIMEZONE = 'Europe/Moscow'
+RESET_HOUR = 8
+

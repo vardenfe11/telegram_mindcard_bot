@@ -79,22 +79,31 @@ class User_db(Model):
     state = CharField()
     add_cards_to_stack = BooleanField()
     today_score = IntegerField(default=0)
+    today_date = CharField(default='', null=True)
 
     class Meta:
         database = users_db
+
+
+def init_user_db():
+    if not os.path.exists('users.db'):
+        User_db.create_table()
+    else:
+        columns = [c.name for c in users_db.get_columns('user_db')]
+        if 'today_score' not in columns:
+            users_db.execute_sql('ALTER TABLE user_db ADD COLUMN today_score INTEGER DEFAULT 0')
+        if 'today_date' not in columns:
+            users_db.execute_sql('ALTER TABLE user_db ADD COLUMN today_date TEXT DEFAULT ""')
+
+
+init_user_db()
 
 
 # Users DB manager
 class UserUpdater:
     def __init__(self):
         self.user = None
-        if not os.path.exists('users.db'):
-            User_db.create_table()
-        else:
-            # Check if today_score exists
-            columns = [c.name for c in users_db.get_columns('user_db')]
-            if 'today_score' not in columns:
-                users_db.execute_sql('ALTER TABLE user_db ADD COLUMN today_score INTEGER DEFAULT 0')
+        init_user_db()
 
     def save(self, user):
         # Save user from bot to DB
@@ -111,6 +120,7 @@ class UserUpdater:
             db_user.nickname_change = user.nickname_change
             db_user.add_cards_to_stack = user.add_cards_to_stack
             db_user.today_score = user.today_score
+            db_user.today_date = str(getattr(user, 'today_date', '') or '')
             db_user.save()
         else:
             self.create_user(user)
@@ -129,6 +139,7 @@ class UserUpdater:
             user.nickname_change = db_user.nickname_change
             user.add_cards_to_stack = db_user.add_cards_to_stack
             user.today_score = db_user.today_score
+            user.today_date = getattr(db_user, 'today_date', '') or ''
         else:
             self.create_user(user)
 
@@ -147,6 +158,7 @@ class UserUpdater:
                 nickname_change=user.nickname_change,
                 add_cards_to_stack=user.add_cards_to_stack,
                 today_score=user.today_score,
+                today_date=str(getattr(user, 'today_date', '') or ''),
             )
         except Exception as error:
             log.exception(f'Ошибка при записи в БД: {error}')
